@@ -101,6 +101,8 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
   const [gcal, setGcal] = useState(editing?.add_to_gcal ?? false);
   const [showErrors, setShowErrors] = useState(false);
 
+  // Events brought in from Google already live there, so they are never sent back.
+  const imported = editing?.source === "gcal";
   const isBirthday = category === "birthday";
   const oneOff = ONE_OFF.includes(category);
   const repeats = !isBirthday && !oneOff && freq !== "today" && freq !== "tomorrow";
@@ -180,7 +182,7 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
       time,
       start_date: scheduleDate,
       recurrence: buildRecurrence(),
-      add_to_gcal: isBirthday ? true : gcal,
+      add_to_gcal: imported ? false : isBirthday ? true : gcal,
       source: editing?.source ?? "manual",
       source_ref: editing?.source_ref ?? null,
       target: category === "goal" && target.trim() ? target.trim() : null,
@@ -381,21 +383,25 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
         </label>
       </Field>
 
-      <label className="flex min-h-11 items-start gap-3">
-        <input
-          type="checkbox"
-          checked={isBirthday ? true : gcal}
-          disabled={isBirthday}
-          onChange={(e) => setGcal(e.target.checked)}
-          className="check mt-0.5"
-        />
-        <span>
-          Add to Google Calendar
-          <span className="block text-sm text-muted">
-            {isBirthday ? "Birthdays are always added." : "Sent once Google Calendar is connected."}
+      {imported ? (
+        <p className="text-sm text-muted">This came from Google Calendar, so it stays there and is not sent back.</p>
+      ) : (
+        <label className="flex min-h-11 items-start gap-3">
+          <input
+            type="checkbox"
+            checked={isBirthday ? true : gcal}
+            disabled={isBirthday}
+            onChange={(e) => setGcal(e.target.checked)}
+            className="check mt-0.5"
+          />
+          <span>
+            Add to Google Calendar
+            <span className="block text-sm text-muted">
+              {isBirthday ? "Birthdays are always added." : "Sent once Google Calendar is connected."}
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      )}
 
       <div className="flex gap-3 pt-1">
         <button type="button" onClick={onCancel} className="btn-secondary flex-1">

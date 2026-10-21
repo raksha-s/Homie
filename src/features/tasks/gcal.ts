@@ -153,6 +153,10 @@ export async function deleteInstance(token: string, eventId: string, task: Task,
 
 export type GoogleEvent = {
   id: string;
+  /** For one day of a repeating event, the id of the whole series. */
+  recurringEventId?: string;
+  /** Google marks events made with its "Birthday" option as "birthday". */
+  eventType?: string;
   status?: string;
   summary?: string;
   start?: { date?: string; dateTime?: string };
@@ -177,19 +181,36 @@ export function isImportable(e: GoogleEvent): boolean {
   return e.status !== "cancelled" && !e.extendedProperties?.private?.homieTaskId && Boolean(e.start);
 }
 
-/** A Google event becomes a Reminder. It is not pushed back to Google, since it already lives there. */
+/** Google's own birthday type, or an all-day event whose title says birthday. */
+export function isBirthdayEvent(e: GoogleEvent): boolean {
+  return e.eventType === "birthday" || (Boolean(e.start?.date) && /birthday|b'?day/i.test(e.summary ?? ""));
+}
+
+/** One stable key per event. A birthday repeats every year, so it is keyed by the whole series. */
+export function importRef(e: GoogleEvent): string {
+  return isBirthdayEvent(e) ? (e.recurringEventId ?? e.id) : e.id;
+}
+
+/** Birthdays behave like the ones made in Homie: yearly, and due at 9:00 AM on the day. */
+export const BIRTHDAY_TIME = "09:00";
+
+/**
+ * A Google event becomes a Reminder, or a Birthday when Google says it is one. It is not pushed
+ * back to Google, since it already lives there.
+ */
 export function eventToTask(e: GoogleEvent): NewTask {
   const when = e.start?.dateTime ? new Date(e.start.dateTime) : null;
-  return {
+  const base = {
     title: e.summary?.trim() || "(no title)",
-    category: "reminder",
-    time: when ? nowTime(when) : null,
     start_date: when ? toISO(when) : (e.start?.date as string),
-    recurrence: { type: "once" },
     add_to_gcal: false,
-    source: "gcal",
-    source_ref: e.id,
+    source: "gcal" as const,
+    source_ref: importRef(e),
     target: null,
     gcal_event_id: null,
   };
+  if (isBirthdayEvent(e)) {
+    return { ...base, category: "birthday", time: BIRTHDAY_TIME, recurrence: { type: "yearly" } };
+  }
+  return { ...base, category: "reminder", time: when ? nowTime(when) : null, recurrence: { type: "once" } };
 }

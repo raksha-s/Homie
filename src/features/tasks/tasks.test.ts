@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from "vitest";
 import { dayStats } from "../calendar/dayStats";
-import { buildEvent, eventToTask, isImportable } from "./gcal";
+import { buildEvent, eventToTask, importRef, isBirthdayEvent, isImportable } from "./gcal";
 import { occursOn } from "./recurrence";
 import { ALL_SLOTS, nextSlotAfter, slotCounts, slotState, suggestSlot } from "./slots";
 import type { Recurrence, Task } from "./types";
@@ -240,6 +240,21 @@ describe("Google Calendar import", () => {
     const task = eventToTask({ id: "e2", summary: "Holiday", start: { date: "2026-10-26" } });
     expect(task.time).toBeNull();
     expect(task.start_date).toBe("2026-10-26");
+  });
+
+  it("recognises Google birthdays and keys them by the whole series", () => {
+    const e = { id: "b_20261103", recurringEventId: "b", eventType: "birthday", summary: "Asha", start: { date: "2026-11-03" } };
+    expect(isBirthdayEvent(e)).toBe(true);
+    expect(importRef(e)).toBe("b");
+    const task = eventToTask(e);
+    expect(task).toMatchObject({ category: "birthday", recurrence: { type: "yearly" }, time: "09:00", source_ref: "b", start_date: "2026-11-03" });
+    expect(task.add_to_gcal).toBe(false);
+  });
+
+  it("treats an all-day event titled birthday as a birthday, but not a timed one", () => {
+    expect(isBirthdayEvent({ id: "x", summary: "Ravi's birthday", start: { date: "2026-11-03" } })).toBe(true);
+    expect(isBirthdayEvent({ id: "y", summary: "Birthday dinner", start: { dateTime: "2026-11-03T19:00:00" } })).toBe(false);
+    expect(isBirthdayEvent({ id: "z", summary: "Team lunch", start: { date: "2026-11-03" } })).toBe(false);
   });
 
   it("skips events Homie made and cancelled ones", () => {

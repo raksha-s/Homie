@@ -4,6 +4,7 @@ import { ArrowsClockwise, CaretLeft, CaretRight } from "@phosphor-icons/react";
 import PageHeader from "../components/PageHeader";
 import SubTabs from "../components/SubTabs";
 import Dots from "../features/calendar/Dots";
+import Ring from "../features/calendar/Ring";
 import { dayStats, describeDay, type DayStats } from "../features/calendar/dayStats";
 import { useTasks } from "../features/tasks/TasksProvider";
 import {
@@ -177,19 +178,18 @@ function MonthView({ anchor, today, statsFor, openDay }: ViewProps) {
               role="gridcell"
               aria-label={describeDay(`${formatDay(d)}${isToday ? ", today" : ""}`, s, d > today)}
               onClick={() => openDay(d)}
-              className={`pressable flex min-h-[60px] flex-col items-center gap-0.5 rounded-xl py-1 ${inMonth ? "" : "opacity-45"}`}
+              className={`pressable flex min-h-[62px] flex-col items-center gap-1 rounded-xl py-1 ${inMonth ? "" : "opacity-45"}`}
             >
-              <span
-                className={`grid size-7 place-items-center rounded-full text-sm font-medium ${
-                  isToday ? "bg-accent text-on-accent" : ""
-                }`}
-              >
-                {parseISO(d).d}
-              </span>
+              <Ring percent={d <= today ? s.percent : null}>
+                <span
+                  className={`grid size-[28px] place-items-center rounded-full text-sm font-medium ${
+                    isToday ? "bg-accent text-on-accent" : ""
+                  }`}
+                >
+                  {parseISO(d).d}
+                </span>
+              </Ring>
               <Dots categories={s.categories} size={6} />
-              <span className="text-[11px] leading-none tabular-nums text-muted">
-                {s.percent === null || d > today ? "" : `${s.percent}%`}
-              </span>
             </button>
           );
         })}
@@ -224,12 +224,16 @@ function WeekView({
             >
               <span className="flex w-11 shrink-0 flex-col items-center">
                 <span className="text-xs font-medium text-muted">{WEEKDAY_SHORT[weekday(d)]}</span>
-                <span
-                  className={`mt-0.5 grid size-9 place-items-center rounded-full text-lg font-semibold ${
-                    isToday ? "bg-accent text-on-accent" : ""
-                  }`}
-                >
-                  {parseISO(d).d}
+                <span className="mt-0.5">
+                  <Ring percent={d <= today ? s.percent : null} size={40}>
+                    <span
+                      className={`grid size-[30px] place-items-center rounded-full text-base font-semibold ${
+                        isToday ? "bg-accent text-on-accent" : ""
+                      }`}
+                    >
+                      {parseISO(d).d}
+                    </span>
+                  </Ring>
                 </span>
               </span>
               <span className="min-w-0 flex-1">
@@ -287,7 +291,7 @@ function YearView({
             >
               <span className="mb-2 flex items-baseline justify-between">
                 <span className="font-semibold">{monthLong(m)}</span>
-                <span className="text-xs tabular-nums text-muted">{pct === null ? "" : `${pct}%`}</span>
+                <Ring percent={pct} size={20} stroke={3} />
               </span>
               <span className="grid grid-cols-7 gap-px text-center text-[10px] leading-[14px]" aria-hidden="true">
                 {grid.slice(0, parseISO(grid[35]).m === m ? 42 : 35).map((d) => {
@@ -325,7 +329,7 @@ function Legend() {
           {i.label}
         </li>
       ))}
-      <li>Percentages show tasks done out of tasks not skipped, for today and earlier days.</li>
+      <li>The ring around a date shows how much of that day was done, out of tasks not skipped. Days ahead have no ring.</li>
     </ul>
   );
 }
@@ -340,7 +344,7 @@ function GoogleSync() {
         Google Calendar
       </h2>
       <p className="mt-1 text-sm text-muted">
-        Brings events from the next two weeks into Homie as Reminders. Events Homie sent to Google are not brought back, and nothing is imported twice.
+        Brings events from the next two weeks into Homie as Reminders, and birthdays as Birthdays. Events Homie sent to Google are not brought back, and nothing is imported twice.
       </p>
       <button
         type="button"
@@ -357,7 +361,14 @@ function GoogleSync() {
       </button>
       {last ? (
         <p role="status" className="mt-3 text-sm">
-          {last.count === 0 ? "Already up to date." : `Added ${last.count} ${last.count === 1 ? "event" : "events"} as Reminders.`}
+          {last.count === 0 && last.converted === 0
+            ? "Already up to date."
+            : [
+                last.count ? `Added ${last.count} ${last.count === 1 ? "event" : "events"}.` : "",
+                last.converted ? `Turned ${last.converted} into ${last.converted === 1 ? "a birthday" : "birthdays"}.` : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
           {last.addedSundayTask ? " A reminder every Sunday at 7:00 AM will now prompt you to sync." : ""}
         </p>
       ) : null}

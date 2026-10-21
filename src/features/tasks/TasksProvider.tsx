@@ -12,7 +12,7 @@ import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../auth/AuthProvider";
 import { addDays, weekday, dayNumber, fromDayNumber, nowTime, normTime, todayISO, type ISODate } from "../../lib/dates";
 import { googleConfigured, loadGoogle, requestGoogleToken } from "../../lib/google";
-import { createEvent, deleteEvent, deleteInstance, eventToTask, isImportable, listEvents, updateEvent } from "./gcal";
+import { createEvent, deleteEvent, deleteInstance, eventToTask, importRef, isBirthdayEvent, isImportable, listEvents, updateEvent } from "./gcal";
 import { occursOn } from "./recurrence";
 import type { NewTask, Occurrence, OccurrenceStatus, Recurrence, Task } from "./types";
 
@@ -53,7 +53,7 @@ type Ctx = {
   syncPendingGcal: () => Promise<boolean>;
   /** Pull the next two weeks of Google Calendar events in as Reminders. */
   importFromGoogle: () => Promise<boolean>;
-  lastImport: { count: number; at: string; addedSundayTask: boolean } | null;
+  lastImport: { count: number; converted: number; at: string; addedSundayTask: boolean } | null;
 };
 
 const TasksContext = createContext<Ctx | null>(null);
@@ -330,9 +330,30 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       return attempt(() =>
         withGcal(tok, "Could not read Google Calendar", async (token) => {
           const events = (await listEvents(token, today, addDays(today, 14))).filter(isImportable);
-          const known = new Set(tasks.filter((t) => t.source === "gcal").map((t) => t.source_ref));
-          const fresh = events.filter((e) => !known.has(e.id));
-          for (const e of fresh) await insertTask(eventToTask(e));
+          const known = new Map(tasks.filter((t) => t.source === "gcal").map((t) => [t.source_ref, t]));
+          let added = 0;
+          let converted = 0;
+          for (const e of events) {
+            const ref = importRef(e);
+            const existing = known.get(ref) ?? known.get(e.id);
+            if (existing) {
+              // An event imported before Homie knew about birthdays: promote it in place.
+              if (isBirthdayEvent(e) && existing.category !== "birthday") {
+                const fix = eventToTask(e);
+                await patchTask(existing.id, {
+                  category: "birthday",
+                  time: fix.time,
+                  recurrence: fix.recurrence,
+                  source_ref: fix.source_ref,
+                });
+                converted++;
+              }
+              continue;
+            }
+            const created = await insertTask(eventToTask(e));
+            known.set(ref, created);
+            added++;
+          }
           // The weekly nudge to run this again, because a browser app cannot sync by itself.
           const hasNudge = tasks.some((t) => t.source_ref === "gcal-sync");
           if (!hasNudge) {
@@ -349,7 +370,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
               gcal_event_id: null,
             });
           }
-          setLastImport({ count: fresh.length, at: new Date().toISOString(), addedSundayTask: !hasNudge });
+          setLastImport({ count: added, converted, at: new Date().toISOString(), addedSundayTask: !hasNudge });
         }),
       );
     },
@@ -389,7 +410,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
       });
     },
     modifyTask: (task, date, scope, next) => {
-      const tok = task.gcal_event_id || next.add_to_gcal ? startToken() : null;
+      const tok = task.gcal_event_id || (next.add_to_gcal && task.source !== "gcal") ? startToken() : null;
       const sorry = "Saved, but Google Calendar was not updated";
       return attempt(async () => {
         const inPlace =
