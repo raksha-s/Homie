@@ -9,11 +9,14 @@ export default function Ring({
   percent,
   size = 38,
   stroke = 3,
+  dim = false,
   children,
 }: {
   percent: number | null;
   size?: number;
   stroke?: number;
+  /** Unselected days sit back a little so the chosen one stands out. */
+  dim?: boolean;
   children?: ReactNode;
 }) {
   const r = (size - stroke) / 2;
@@ -21,7 +24,9 @@ export default function Ring({
   return (
     <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
       {percent !== null ? (
-        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 -rotate-90" aria-hidden="true">
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 -rotate-90"
+          style={{ opacity: dim ? 0.5 : 1 }}
+          aria-hidden="true">
           <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="color-mix(in srgb, var(--text-muted) 32%, var(--surface))" strokeWidth={stroke} />
           {percent > 0 ? (
             <circle

@@ -3,10 +3,12 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowsClockwise, CaretLeft, CaretRight } from "@phosphor-icons/react";
 import PageHeader from "../components/PageHeader";
 import SubTabs from "../components/SubTabs";
+import DayTasks from "../features/calendar/DayTasks";
 import Dots from "../features/calendar/Dots";
 import Ring from "../features/calendar/Ring";
-import { dayStats, describeDay, type DayStats } from "../features/calendar/dayStats";
-import { useTasks } from "../features/tasks/TasksProvider";
+import { describeDay, type DayStats } from "../features/calendar/dayStats";
+import { useDayStats } from "../features/calendar/useDayStats";
+import { useTasks, type TaskInstance } from "../features/tasks/TasksProvider";
 import {
   addDays,
   addMonths,
@@ -39,10 +41,12 @@ export default function CalendarPage() {
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const today = todayISO();
+  const statsFor = useDayStats();
 
   const view: View = (VIEWS.find((v) => v.key === params.get("view"))?.key ?? "month") as View;
   const rawOn = params.get("on") ?? "";
   const anchor: ISODate = /^\d{4}-\d{2}-\d{2}$/.test(rawOn) ? rawOn : today;
+  const [selected, setSelected] = useState<ISODate>(anchor);
 
   const setView = (v: View) => setParams({ view: v, ...(anchor !== today ? { on: anchor } : {}) }, { replace: true });
   const setAnchor = (d: ISODate) => setParams({ view, ...(d !== today ? { on: d } : {}) }, { replace: true });
@@ -62,24 +66,22 @@ export default function CalendarPage() {
     void t.ensureRange(from, to);
   }, [from, to]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const statsFor = useMemo(() => {
-    const cache = new Map<ISODate, DayStats>();
-    return (d: ISODate) => {
-      let s = cache.get(d);
-      if (!s) {
-        s = dayStats(t.instancesOn(d));
-        cache.set(d, s);
-      }
-      return s;
-    };
-  }, [t.instancesOn]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const openDay = (d: ISODate) => nav(d === today ? "/main/tasks" : `/main/tasks?date=${d}`);
+  const openInTasks = (d: ISODate) => nav(d === today ? "/main/tasks" : `/main/tasks?date=${d}`);
+  const toggle = (i: TaskInstance) => void t.setStatus(i.task, i.date, i.status === "done" ? "pending" : "done");
 
   const step = (dir: -1 | 1) => {
     if (view === "week") setAnchor(addDays(anchor, 7 * dir));
-    else if (view === "month") setAnchor(addMonths(anchor, dir));
-    else setAnchor(addMonths(anchor, 12 * dir));
+    else if (view === "month") {
+      const next = addMonths(anchor, dir);
+      setAnchor(next);
+      // Keep the chosen day inside the month on screen.
+      setSelected(monthStart(next) === monthStart(today) ? today : next);
+    } else setAnchor(addMonths(anchor, 12 * dir));
+  };
+
+  const goToday = () => {
+    setAnchor(today);
+    setSelected(today);
   };
 
   const title =
@@ -120,7 +122,7 @@ export default function CalendarPage() {
           {title}
         </h2>
         {!isCurrent ? (
-          <button type="button" onClick={() => setAnchor(today)} className="btn-secondary !min-h-11 !px-4 text-sm">
+          <button type="button" onClick={goToday} className="btn-secondary !min-h-11 !px-4 text-sm">
             Today
           </button>
         ) : null}
@@ -132,11 +134,28 @@ export default function CalendarPage() {
       {t.loading ? (
         <div aria-busy="true" className="h-72 animate-pulse rounded-[var(--radius-card)] bg-sunken motion-reduce:animate-none" />
       ) : view === "week" ? (
-        <WeekView anchor={anchor} today={today} statsFor={statsFor} openDay={openDay} instancesOn={t.instancesOn} />
+        <WeekView
+          anchor={anchor}
+          today={today}
+          statsFor={statsFor}
+          instancesOn={t.instancesOn}
+          onToggle={toggle}
+          openInTasks={openInTasks}
+        />
       ) : view === "month" ? (
-        <MonthView anchor={anchor} today={today} statsFor={statsFor} openDay={openDay} />
+        <>
+          <MonthView anchor={anchor} today={today} selected={selected} statsFor={statsFor} onSelect={setSelected} />
+          <DayPanel
+            date={selected}
+            today={today}
+            stats={statsFor(selected)}
+            instances={t.instancesOn(selected)}
+            onToggle={toggle}
+            openInTasks={openInTasks}
+          />
+        </>
       ) : (
-        <YearView anchor={anchor} today={today} statsFor={statsFor} openMonth={(m) => setParams({ view: "month", on: m })} />
+        <YearView anchor={anchor} today={today} statsFor={statsFor} openMonth={(m) => { setSelected(m); setParams({ view: "month", on: m }); }} />
       )}
 
       <Legend />
@@ -145,14 +164,19 @@ export default function CalendarPage() {
   );
 }
 
-type ViewProps = {
+function MonthView({
+  anchor,
+  today,
+  selected,
+  statsFor,
+  onSelect,
+}: {
   anchor: ISODate;
   today: ISODate;
+  selected: ISODate;
   statsFor: (d: ISODate) => DayStats;
-  openDay: (d: ISODate) => void;
-};
-
-function MonthView({ anchor, today, statsFor, openDay }: ViewProps) {
+  onSelect: (d: ISODate) => void;
+}) {
   const grid = monthGrid(anchor);
   const month = parseISO(anchor).m;
   // Drop a trailing week that is entirely the next month.
@@ -171,19 +195,23 @@ function MonthView({ anchor, today, statsFor, openDay }: ViewProps) {
           const s = statsFor(d);
           const inMonth = parseISO(d).m === month;
           const isToday = d === today;
+          const isSel = d === selected;
           return (
             <button
               key={d}
               type="button"
               role="gridcell"
+              aria-selected={isSel}
               aria-label={describeDay(`${formatDay(d)}${isToday ? ", today" : ""}`, s, d > today)}
-              onClick={() => openDay(d)}
-              className={`pressable flex min-h-[62px] flex-col items-center gap-1 rounded-xl py-1 ${inMonth ? "" : "opacity-45"}`}
+              onClick={() => onSelect(d)}
+              className={`pressable flex min-h-[62px] flex-col items-center gap-1 rounded-xl py-1 ${
+                isSel ? "bg-sunken" : ""
+              } ${inMonth ? "" : "opacity-45"}`}
             >
-              <Ring percent={s.percent}>
+              <Ring percent={s.percent} dim={!isSel}>
                 <span
-                  className={`grid size-[28px] place-items-center rounded-full text-sm font-medium ${
-                    isToday ? "bg-accent text-on-accent" : ""
+                  className={`grid size-[28px] place-items-center rounded-full text-sm ${
+                    isToday ? "bg-accent font-medium text-on-accent" : isSel ? "font-bold" : "font-medium"
                   }`}
                 >
                   {parseISO(d).d}
@@ -198,59 +226,107 @@ function MonthView({ anchor, today, statsFor, openDay }: ViewProps) {
   );
 }
 
+/** The chosen day's tasks, under the month, with a tick on each. */
+function DayPanel({
+  date,
+  today,
+  stats,
+  instances,
+  onToggle,
+  openInTasks,
+}: {
+  date: ISODate;
+  today: ISODate;
+  stats: DayStats;
+  instances: TaskInstance[];
+  onToggle: (i: TaskInstance) => void;
+  openInTasks: (d: ISODate) => void;
+}) {
+  return (
+    <section aria-labelledby="day-panel" className="mt-4">
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 id="day-panel" className="font-semibold">
+            {date === today ? "Today" : formatDay(date)}
+          </h3>
+          <p className="text-sm text-muted" aria-live="polite">
+            {date === today ? `${formatDay(date)} · ` : ""}
+            {stats.total ? `${stats.done} of ${stats.total} done` : "Nothing planned"}
+          </p>
+        </div>
+        <button type="button" onClick={() => openInTasks(date)} className="btn-secondary !min-h-10 shrink-0 !px-3 text-sm">
+          Open day
+        </button>
+      </div>
+      {instances.length ? (
+        <DayTasks instances={instances} onToggle={onToggle} />
+      ) : (
+        <p className="rounded-[var(--radius-card)] border border-dashed border-line px-4 py-6 text-center text-sm text-muted">
+          Nothing planned for this day. Open the day to add a task.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function WeekView({
   anchor,
   today,
   statsFor,
-  openDay,
   instancesOn,
-}: ViewProps & { instancesOn: ReturnType<typeof useTasks>["instancesOn"] }) {
+  onToggle,
+  openInTasks,
+}: {
+  anchor: ISODate;
+  today: ISODate;
+  statsFor: (d: ISODate) => DayStats;
+  instancesOn: (d: ISODate) => TaskInstance[];
+  onToggle: (i: TaskInstance) => void;
+  openInTasks: (d: ISODate) => void;
+}) {
   const start = startOfWeek(anchor);
   return (
-    <ul className="flex flex-col gap-2">
+    <ul className="flex flex-col gap-3">
       {Array.from({ length: 7 }, (_, i) => addDays(start, i)).map((d) => {
         const s = statsFor(d);
-        const preview = instancesOn(d).filter((x) => x.status !== "skipped").slice(0, 3);
+        const instances = instancesOn(d);
         const isToday = d === today;
         return (
-          <li key={d}>
-            <button
-              type="button"
-              onClick={() => openDay(d)}
-              aria-label={describeDay(`${formatDay(d)}${isToday ? ", today" : ""}`, s, d > today)}
-              className={`pressable flex w-full gap-3 rounded-[var(--radius-card)] border bg-surface p-3 text-left ${
-                isToday ? "border-accent" : "border-line"
-              }`}
-            >
-              <span className="flex w-11 shrink-0 flex-col items-center">
-                <span className="text-xs font-medium text-muted">{WEEKDAY_SHORT[weekday(d)]}</span>
-                <span className="mt-0.5">
-                  <Ring percent={s.percent} size={40}>
-                    <span
-                      className={`grid size-[30px] place-items-center rounded-full text-base font-semibold ${
-                        isToday ? "bg-accent text-on-accent" : ""
-                      }`}
-                    >
-                      {parseISO(d).d}
-                    </span>
-                  </Ring>
+          <li
+            key={d}
+            className={`rounded-[var(--radius-card)] border bg-surface p-3 ${isToday ? "border-accent" : "border-line"}`}
+          >
+            <div className="flex items-center gap-3">
+              <Ring percent={s.percent} size={44} dim={!isToday}>
+                <span
+                  className={`grid size-[32px] place-items-center rounded-full text-base ${
+                    isToday ? "bg-accent font-semibold text-on-accent" : "font-medium"
+                  }`}
+                >
+                  {parseISO(d).d}
                 </span>
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2 text-sm">
-                  <Dots categories={s.categories} />
-                  <span className="text-muted">
-                    {s.total ? `${s.total} ${s.total === 1 ? "task" : "tasks"}${d > today ? " planned" : ` · ${s.percent}% done`}` : "Nothing planned"}
-                  </span>
-                </span>
-                {preview.map((p) => (
-                  <span key={p.task.id} className="mt-0.5 block truncate text-sm">
-                    {p.task.title}
-                  </span>
-                ))}
-                {s.total > preview.length ? <span className="mt-0.5 block text-sm text-muted">and {s.total - preview.length} more</span> : null}
-              </span>
-            </button>
+              </Ring>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-semibold">{WEEKDAY_SHORT[weekday(d)]}</h3>
+                <p className="text-sm text-muted">
+                  {s.total ? `${s.done} of ${s.total} done` : "Nothing planned"}
+                </p>
+              </div>
+              <Dots categories={s.categories} />
+              <button
+                type="button"
+                aria-label={`Open ${formatDay(d)} in My Tasks`}
+                onClick={() => openInTasks(d)}
+                className="pressable grid size-11 shrink-0 place-items-center rounded-full text-muted"
+              >
+                <CaretRight size={18} aria-hidden="true" />
+              </button>
+            </div>
+            {instances.length ? (
+              <div className="mt-1">
+                <DayTasks instances={instances} onToggle={onToggle} />
+              </div>
+            ) : null}
           </li>
         );
       })}
@@ -263,7 +339,12 @@ function YearView({
   today,
   statsFor,
   openMonth,
-}: Omit<ViewProps, "openDay"> & { openMonth: (firstOfMonth: ISODate) => void }) {
+}: {
+  anchor: ISODate;
+  today: ISODate;
+  statsFor: (d: ISODate) => DayStats;
+  openMonth: (firstOfMonth: ISODate) => void;
+}) {
   const y = parseISO(anchor).y;
   return (
     <ul className="grid grid-cols-2 gap-3">
@@ -285,11 +366,11 @@ function YearView({
           <li key={first}>
             <button
               type="button"
-              onClick={() => openMonth(first)}
+              onClick={() => openMonth(isNow ? today : first)}
               aria-label={`${monthLong(m)} ${y}${total ? `, ${pct} percent of ${total} tasks done so far` : ""}`}
               className={`pressable block w-full rounded-[var(--radius-card)] border bg-surface p-3 text-left ${isNow ? "border-accent" : "border-line"}`}
             >
-              <span className="mb-2 flex items-baseline justify-between">
+              <span className="mb-2 flex items-center justify-between">
                 <span className="font-semibold">{monthLong(m)}</span>
                 <Ring percent={pct} size={20} stroke={3} />
               </span>
@@ -322,14 +403,13 @@ function Legend() {
     { key: "goal", label: "Goal" },
   ];
   return (
-    <ul aria-label="Dot colours" className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+    <ul aria-label="Dot colours" className="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
       {items.map((i) => (
         <li key={i.key} className="flex items-center gap-1.5">
           <span className={`dot dot-${i.key}`} style={{ width: 8, height: 8 }} aria-hidden="true" />
           {i.label}
         </li>
       ))}
-      <li>A ring around a date means it has tasks. The coloured part is how much of that day was done, out of tasks not skipped, so days ahead show an empty ring.</li>
     </ul>
   );
 }

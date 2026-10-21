@@ -157,7 +157,9 @@ export default function TaskCard(p: Props) {
           onPointerUp={() => endPress(true)}
           onPointerCancel={() => endPress(false)}
           onContextMenu={(e) => e.preventDefault()}
-          className="flex min-w-0 flex-1 flex-col gap-1 rounded-l-[var(--radius-card)] p-4 text-left"
+          className={`flex min-w-0 flex-1 flex-col gap-1 rounded-l-[var(--radius-card)] p-4 text-left ${
+            done || skipped ? "opacity-60" : ""
+          }`}
           style={{ touchAction: "pan-y" }}
         >
           <span className="flex items-center gap-2 text-sm text-muted">

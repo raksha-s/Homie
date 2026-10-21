@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { CaretLeft, CaretRight } from "@phosphor-icons/react";
+import { CaretDown, CaretLeft, CaretRight } from "@phosphor-icons/react";
 import PageHeader from "../components/PageHeader";
+import WeekStrip from "../features/calendar/WeekStrip";
+import { useDayStats } from "../features/calendar/useDayStats";
 import SubTabs from "../components/SubTabs";
 import Fab from "../components/Fab";
 import BottomSheet from "../components/BottomSheet";
@@ -12,7 +14,7 @@ import { ChangeTimeSheet, ConfirmDeleteSheet, ScopeSheet } from "../features/tas
 import { slotCounts, slotState } from "../features/tasks/slots";
 import { useTasks, type EditScope, type TaskInstance } from "../features/tasks/TasksProvider";
 import type { NewTask } from "../features/tasks/types";
-import { addDays, formatDay, todayISO } from "../lib/dates";
+import { addDays, formatDay, formatMonthYear, startOfWeek, todayISO } from "../lib/dates";
 import { googleConfigured } from "../lib/google";
 
 export const mainTabs = [
@@ -40,12 +42,17 @@ export default function TasksPage() {
   const [pending, setPending] = useState<Pending>(null);
   const [deleting, setDeleting] = useState<TaskInstance | null>(null);
   const [changingTime, setChangingTime] = useState<TaskInstance | null>(null);
+  const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     void t.ensureDay(date);
+    // The week strip shows progress for the whole week, so load its done marks too.
+    void t.ensureRange(startOfWeek(date), addDays(startOfWeek(date), 6));
   }, [date]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const statsFor = useDayStats();
 
   useEffect(() => {
     if (!notice) return;
@@ -126,36 +133,61 @@ export default function TasksPage() {
       <PageHeader title="Homie" />
       <SubTabs tabs={mainTabs} label="Main sections" />
 
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-2 flex items-center gap-1">
         <button
           type="button"
-          aria-label="Previous day"
-          onClick={() => goTo(addDays(date, -1))}
-          className="pressable grid size-11 place-items-center rounded-full bg-sunken"
+          onClick={() => setPicking(true)}
+          aria-label={`${formatMonthYear(date)}. Choose a date`}
+          className="pressable -ml-2 flex min-h-11 items-center gap-1 rounded-[var(--radius-control)] px-2 text-xl font-semibold tracking-tight"
         >
-          <CaretLeft size={20} aria-hidden="true" />
+          {formatMonthYear(date)}
+          <CaretDown size={16} weight="bold" aria-hidden="true" className="text-muted" />
         </button>
-        <div className="min-w-0 flex-1 text-center">
-          <h2 className="truncate text-lg font-semibold">{date === today ? "Today" : formatDay(date)}</h2>
-          <p className="text-sm text-muted">
-            {date === today ? `${formatDay(date)} · ` : ""}
-            {ready ? `${doneCount} of ${activeCount} done` : "Loading"}
-          </p>
-        </div>
+        <span className="flex-1" />
         {date !== today ? (
-          <button type="button" onClick={() => goTo(today)} className="btn-secondary !min-h-11 !px-4 text-sm">
+          <button type="button" onClick={() => goTo(today)} className="btn-secondary !min-h-10 !px-4 text-sm">
             Today
           </button>
         ) : null}
-        <button
-          type="button"
-          aria-label="Next day"
-          onClick={() => goTo(addDays(date, 1))}
-          className="pressable grid size-11 place-items-center rounded-full bg-sunken"
-        >
+        <button type="button" aria-label="Previous week" onClick={() => goTo(addDays(date, -7))} className="pressable grid size-11 place-items-center rounded-full text-muted">
+          <CaretLeft size={20} aria-hidden="true" />
+        </button>
+        <button type="button" aria-label="Next week" onClick={() => goTo(addDays(date, 7))} className="pressable -mr-2 grid size-11 place-items-center rounded-full text-muted">
           <CaretRight size={20} aria-hidden="true" />
         </button>
       </div>
+
+      <WeekStrip
+        selected={date}
+        today={today}
+        statsFor={statsFor}
+        onSelect={goTo}
+        onStep={(dir) => goTo(addDays(date, 7 * dir))}
+      />
+
+      <p className="mb-4 mt-3 text-sm text-muted" aria-live="polite">
+        {formatDay(date)} · {ready ? `${doneCount} of ${activeCount} done` : "Loading"}
+      </p>
+
+      <BottomSheet open={picking} onOpenChange={setPicking} title="Go to a date">
+        <div>
+          <label htmlFor="jump-date" className="mb-2 block text-sm font-medium">
+            Date
+          </label>
+          <input
+            id="jump-date"
+            type="date"
+            className="input"
+            value={date}
+            onChange={(e) => {
+              if (e.target.value) {
+                goTo(e.target.value);
+                setPicking(false);
+              }
+            }}
+          />
+        </div>
+      </BottomSheet>
 
       {t.actionError ? (
         <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[var(--radius-control)] border border-danger p-3 text-sm text-danger">
