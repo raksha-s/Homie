@@ -5,8 +5,13 @@ import CalendarPage from "./pages/CalendarPage";
 import KitchenPage from "./pages/KitchenPage";
 import InventoryPage from "./pages/InventoryPage";
 import FinancePage from "./pages/FinancePage";
+import SignInPage from "./pages/SignInPage";
+import { useAuth } from "./auth/AuthProvider";
 
 export default function App() {
+  const { session, loading } = useAuth();
+  if (loading) return <div className="min-h-dvh" aria-busy="true" />;
+  if (!session) return <SignInPage />;
   return (
     <Routes>
       <Route element={<AppShell />}>
