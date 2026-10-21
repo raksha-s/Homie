@@ -135,12 +135,10 @@ export default function TaskCard(p: Props) {
   const blocked = drag ? drag.target !== time && p.slotStateFor(drag.target) === "full" : false;
 
   const dueClass = p.due ? "reminder-due" : "";
-  const surface =
-    task.category === "reminder" || task.category === "birthday" ? "border-l-4 border-l-[var(--cat-reminder-fg)]" : "";
 
   return (
     <li
-      className={`relative rounded-[var(--radius-card)] border border-line bg-surface ${surface} ${dueClass} ${
+      className={`relative rounded-[var(--radius-card)] border border-line bg-surface ${dueClass} ${
         drag ? "z-10 shadow-[var(--shadow)]" : ""
       }`}
       style={drag ? { transform: `translateY(${drag.dy}px)`, transition: "none" } : undefined}

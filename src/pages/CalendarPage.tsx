@@ -180,7 +180,7 @@ function MonthView({ anchor, today, statsFor, openDay }: ViewProps) {
               onClick={() => openDay(d)}
               className={`pressable flex min-h-[62px] flex-col items-center gap-1 rounded-xl py-1 ${inMonth ? "" : "opacity-45"}`}
             >
-              <Ring percent={d <= today ? s.percent : null}>
+              <Ring percent={s.percent}>
                 <span
                   className={`grid size-[28px] place-items-center rounded-full text-sm font-medium ${
                     isToday ? "bg-accent text-on-accent" : ""
@@ -225,7 +225,7 @@ function WeekView({
               <span className="flex w-11 shrink-0 flex-col items-center">
                 <span className="text-xs font-medium text-muted">{WEEKDAY_SHORT[weekday(d)]}</span>
                 <span className="mt-0.5">
-                  <Ring percent={d <= today ? s.percent : null} size={40}>
+                  <Ring percent={s.percent} size={40}>
                     <span
                       className={`grid size-[30px] place-items-center rounded-full text-base font-semibold ${
                         isToday ? "bg-accent text-on-accent" : ""
@@ -329,7 +329,7 @@ function Legend() {
           {i.label}
         </li>
       ))}
-      <li>The ring around a date shows how much of that day was done, out of tasks not skipped. Days ahead have no ring.</li>
+      <li>A ring around a date means it has tasks. The coloured part is how much of that day was done, out of tasks not skipped, so days ahead show an empty ring.</li>
     </ul>
   );
 }
