@@ -18,7 +18,9 @@ export default function App() {
         <Route index element={<Navigate to="/main/tasks" replace />} />
         <Route path="/main/tasks" element={<TasksPage />} />
         <Route path="/main/calendar" element={<CalendarPage />} />
-        <Route path="/kitchen" element={<KitchenPage />} />
+        <Route path="/kitchen" element={<Navigate to="/kitchen/plan" replace />} />
+        <Route path="/kitchen/plan" element={<KitchenPage tab="plan" />} />
+        <Route path="/kitchen/foods" element={<KitchenPage tab="foods" />} />
         <Route path="/inventory" element={<InventoryPage />} />
         <Route path="/finance" element={<FinancePage />} />
         <Route path="*" element={<Navigate to="/main/tasks" replace />} />
