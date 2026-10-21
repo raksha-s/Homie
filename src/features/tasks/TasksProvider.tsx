@@ -10,9 +10,9 @@ import {
 } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../auth/AuthProvider";
-import { addDays, nowTime, normTime, todayISO, type ISODate } from "../../lib/dates";
+import { addDays, weekday, dayNumber, fromDayNumber, nowTime, normTime, todayISO, type ISODate } from "../../lib/dates";
 import { googleConfigured, loadGoogle, requestGoogleToken } from "../../lib/google";
-import { createEvent, deleteEvent, deleteInstance, updateEvent } from "./gcal";
+import { createEvent, deleteEvent, deleteInstance, eventToTask, isImportable, listEvents, updateEvent } from "./gcal";
 import { occursOn } from "./recurrence";
 import type { NewTask, Occurrence, OccurrenceStatus, Recurrence, Task } from "./types";
 
@@ -35,6 +35,8 @@ type Ctx = {
   clearActionError: () => void;
   reload: () => Promise<void>;
   ensureDay: (date: ISODate) => Promise<void>;
+  /** Load done/skipped marks for every day in [from, to]. */
+  ensureRange: (from: ISODate, to: ISODate) => Promise<void>;
   isDayLoaded: (date: ISODate) => boolean;
   instancesOn: (date: ISODate) => TaskInstance[];
   timeOn: (task: Task, date: ISODate) => string | null;
@@ -49,6 +51,9 @@ type Ctx = {
   /** Tasks ticked for Google Calendar that never reached it (for example when Google was not connected). */
   pendingGcal: Task[];
   syncPendingGcal: () => Promise<boolean>;
+  /** Pull the next two weeks of Google Calendar events in as Reminders. */
+  importFromGoogle: () => Promise<boolean>;
+  lastImport: { count: number; at: string; addedSundayTask: boolean } | null;
 };
 
 const TasksContext = createContext<Ctx | null>(null);
@@ -76,6 +81,7 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const [silenced, setSilenced] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(() => new Date());
   const loadedDays = useRef(new Set<ISODate>());
+  const [lastImport, setLastImport] = useState<Ctx["lastImport"]>(null);
   const [, bump] = useState(0);
 
   const mergeOcc = useCallback((rows: Occurrence[]) => {
@@ -131,6 +137,30 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         return;
       }
       loadedDays.current.add(date);
+      mergeOcc((data as any[]).map(rowToOcc));
+      bump((n) => n + 1);
+    },
+    [mergeOcc],
+  );
+
+  const ensureRange = useCallback(
+    async (from: ISODate, to: ISODate) => {
+      const missing: ISODate[] = [];
+      for (let n = dayNumber(from); n <= dayNumber(to); n++) {
+        const d = fromDayNumber(n);
+        if (!loadedDays.current.has(d)) missing.push(d);
+      }
+      if (!missing.length) return;
+      const { data, error } = await supabase
+        .from("task_occurrences")
+        .select("*")
+        .gte("date", missing[0])
+        .lte("date", missing[missing.length - 1]);
+      if (error) {
+        setLoadError(error.message);
+        return;
+      }
+      for (const d of missing) loadedDays.current.add(d);
       mergeOcc((data as any[]).map(rowToOcc));
       bump((n) => n + 1);
     },
@@ -287,12 +317,42 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     clearActionError: () => setActionError(null),
     reload,
     ensureDay,
+    ensureRange,
     isDayLoaded,
     instancesOn,
     timeOn,
     dueReminders,
     silence,
     isSilenced,
+    lastImport,
+    importFromGoogle: () => {
+      const tok = startToken();
+      return attempt(() =>
+        withGcal(tok, "Could not read Google Calendar", async (token) => {
+          const events = (await listEvents(token, today, addDays(today, 14))).filter(isImportable);
+          const known = new Set(tasks.filter((t) => t.source === "gcal").map((t) => t.source_ref));
+          const fresh = events.filter((e) => !known.has(e.id));
+          for (const e of fresh) await insertTask(eventToTask(e));
+          // The weekly nudge to run this again, because a browser app cannot sync by itself.
+          const hasNudge = tasks.some((t) => t.source_ref === "gcal-sync");
+          if (!hasNudge) {
+            await insertTask({
+              title: "Sync Google Calendar into Homie",
+              category: "reminder",
+              time: "07:00",
+              start_date: addDays(today, (7 - weekday(today)) % 7 || 7),
+              recurrence: { type: "weekly", days: [0], until: null },
+              add_to_gcal: false,
+              source: "manual",
+              source_ref: "gcal-sync",
+              target: null,
+              gcal_event_id: null,
+            });
+          }
+          setLastImport({ count: fresh.length, at: new Date().toISOString(), addedSundayTask: !hasNudge });
+        }),
+      );
+    },
     pendingGcal,
     syncPendingGcal: () => {
       const tok = startToken();

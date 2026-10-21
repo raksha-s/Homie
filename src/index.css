@@ -258,3 +258,11 @@ a,
 @keyframes badge-beep {
   50% { transform: scale(1.25); }
 }
+
+/* Calendar dots reuse the category colours, plus the accent for routines. */
+.dot { display: inline-block; border-radius: 999px; }
+.dot-routine { background: var(--accent); }
+.dot-reminder { background: var(--cat-reminder-fg); }
+.dot-birthday { background: var(--cat-birthday-fg); }
+.dot-goal { background: var(--cat-goal-fg); }
+.dot-restock { background: var(--cat-restock-fg); }

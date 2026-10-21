@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from "vitest";
-import { buildEvent } from "./gcal";
+import { dayStats } from "../calendar/dayStats";
+import { buildEvent, eventToTask, isImportable } from "./gcal";
 import { occursOn } from "./recurrence";
 import { ALL_SLOTS, nextSlotAfter, slotCounts, slotState, suggestSlot } from "./slots";
 import type { Recurrence, Task } from "./types";
@@ -203,5 +204,47 @@ describe("Google Calendar events", () => {
     expect(e.start).toEqual({ date: "2027-05-12" });
     expect(e.end).toEqual({ date: "2027-05-13" });
     expect(e.recurrence).toEqual(["RRULE:FREQ=YEARLY"]);
+  });
+});
+
+describe("calendar day stats", () => {
+  const inst = (status: "pending" | "done" | "skipped", category: Task["category"] = "routine") => ({
+    task: t("2026-10-21", { type: "once" }, { category }),
+    date: "2026-10-21",
+    status,
+    time: "09:00",
+  });
+
+  it("counts done out of everything not skipped", () => {
+    const s = dayStats([inst("done"), inst("pending"), inst("skipped"), inst("done", "goal")]);
+    expect(s.total).toBe(3);
+    expect(s.done).toBe(2);
+    expect(s.percent).toBe(67);
+    expect(s.categories).toEqual(["routine", "goal"]);
+  });
+
+  it("has no percentage for an empty or fully skipped day", () => {
+    expect(dayStats([]).percent).toBeNull();
+    expect(dayStats([inst("skipped")]).percent).toBeNull();
+  });
+});
+
+describe("Google Calendar import", () => {
+  it("turns a timed event into a reminder at its local time", () => {
+    const task = eventToTask({ id: "e1", summary: "Dentist", start: { dateTime: "2026-10-25T10:30:00" } });
+    expect(task).toMatchObject({ title: "Dentist", category: "reminder", time: "10:30", start_date: "2026-10-25", source: "gcal", source_ref: "e1" });
+    expect(task.add_to_gcal).toBe(false);
+  });
+
+  it("keeps all-day events without a time", () => {
+    const task = eventToTask({ id: "e2", summary: "Holiday", start: { date: "2026-10-26" } });
+    expect(task.time).toBeNull();
+    expect(task.start_date).toBe("2026-10-26");
+  });
+
+  it("skips events Homie made and cancelled ones", () => {
+    expect(isImportable({ id: "a", start: { date: "2026-10-26" } })).toBe(true);
+    expect(isImportable({ id: "b", start: { date: "2026-10-26" }, extendedProperties: { private: { homieTaskId: "x" } } })).toBe(false);
+    expect(isImportable({ id: "c", status: "cancelled", start: { date: "2026-10-26" } })).toBe(false);
   });
 });

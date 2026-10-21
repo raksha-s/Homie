@@ -1,7 +1,18 @@
-import { addDays, dayNumber, fromDayNumber, minutesToTime, parseISO, timeToMinutes, todayISO, type ISODate } from "../../lib/dates";
+import {
+  addDays,
+  dayNumber,
+  fromDayNumber,
+  minutesToTime,
+  nowTime,
+  parseISO,
+  timeToMinutes,
+  todayISO,
+  toISO,
+  type ISODate,
+} from "../../lib/dates";
 import { googleFetch } from "../../lib/google";
 import { occursOn } from "./recurrence";
-import type { Recurrence, Task } from "./types";
+import type { NewTask, Recurrence, Task } from "./types";
 
 const EVENTS = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
 const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
@@ -139,3 +150,46 @@ export async function deleteInstance(token: string, eventId: string, task: Task,
   await check(res, "Removing that day from Google Calendar");
 }
 
+
+export type GoogleEvent = {
+  id: string;
+  status?: string;
+  summary?: string;
+  start?: { date?: string; dateTime?: string };
+  extendedProperties?: { private?: Record<string, string> };
+};
+
+/** Events in [from, to] with repeats already expanded into single days, soonest first. */
+export async function listEvents(token: string, from: ISODate, to: ISODate): Promise<GoogleEvent[]> {
+  const params = new URLSearchParams({
+    timeMin: new Date(`${from}T00:00:00`).toISOString(),
+    timeMax: new Date(`${addDays(to, 1)}T00:00:00`).toISOString(),
+    singleEvents: "true",
+    orderBy: "startTime",
+    maxResults: "250",
+  });
+  const res = await check(await googleFetch(token, `${EVENTS}?${params}`), "Reading Google Calendar");
+  return ((await res.json()) as { items?: GoogleEvent[] }).items ?? [];
+}
+
+/** Events Homie made itself, and cancelled ones, are not imported back. */
+export function isImportable(e: GoogleEvent): boolean {
+  return e.status !== "cancelled" && !e.extendedProperties?.private?.homieTaskId && Boolean(e.start);
+}
+
+/** A Google event becomes a Reminder. It is not pushed back to Google, since it already lives there. */
+export function eventToTask(e: GoogleEvent): NewTask {
+  const when = e.start?.dateTime ? new Date(e.start.dateTime) : null;
+  return {
+    title: e.summary?.trim() || "(no title)",
+    category: "reminder",
+    time: when ? nowTime(when) : null,
+    start_date: when ? toISO(when) : (e.start?.date as string),
+    recurrence: { type: "once" },
+    add_to_gcal: false,
+    source: "gcal",
+    source_ref: e.id,
+    target: null,
+    gcal_event_id: null,
+  };
+}

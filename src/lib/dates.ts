@@ -88,3 +88,42 @@ export function formatDayShort(iso: ISODate): string {
 export function comingSaturday(from: ISODate): ISODate {
   return addDays(from, (6 - weekday(from) + 7) % 7);
 }
+
+const MONTHS_LONG = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+export const monthLong = (m: number) => MONTHS_LONG[m - 1];
+
+export function monthStart(iso: ISODate): ISODate {
+  const { y, m } = parseISO(iso);
+  return `${y}-${pad(m)}-01`;
+}
+
+export function addMonths(iso: ISODate, n: number): ISODate {
+  const { y, m } = parseISO(iso);
+  const idx = y * 12 + (m - 1) + n;
+  return `${Math.floor(idx / 12)}-${pad((idx % 12) + 1)}-01`;
+}
+
+export function formatMonthYear(iso: ISODate): string {
+  const { y, m } = parseISO(iso);
+  return `${MONTHS_LONG[m - 1]} ${y}`;
+}
+
+/** The 6 weeks (Sunday first) that cover a month, as 42 dates. */
+export function monthGrid(iso: ISODate): ISODate[] {
+  const first = monthStart(iso);
+  const start = startOfWeek(first);
+  return Array.from({ length: 42 }, (_, i) => addDays(start, i));
+}
+
+export function formatWeekRange(iso: ISODate): string {
+  const s = startOfWeek(iso);
+  const e = addDays(s, 6);
+  const a = parseISO(s);
+  const b = parseISO(e);
+  const short = (m: number) => MONTHS_SHORT[m - 1];
+  return a.m === b.m ? `${a.d} to ${b.d} ${short(b.m)} ${b.y}` : `${a.d} ${short(a.m)} to ${b.d} ${short(b.m)} ${b.y}`;
+}
