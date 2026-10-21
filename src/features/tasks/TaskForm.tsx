@@ -1,6 +1,7 @@
-import { useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import {
   addDays,
+  comingSaturday,
   formatDayShort,
   formatTime,
   nowTime,
@@ -38,11 +39,20 @@ const FREQUENCIES: { key: FreqKey; label: string }[] = [
 ];
 
 const FORM_CATEGORIES: { key: Category; label: string }[] = [
+  { key: "restock", label: "Shopping List" },
   { key: "routine", label: "Daily routine" },
   { key: "reminder", label: "Reminder" },
   { key: "birthday", label: "Birthday" },
   { key: "goal", label: "Goal" },
 ];
+
+/** Only Daily routine repeats on a schedule. Reminders, goals and shopping are single dated items. */
+const ONE_OFF: Category[] = ["reminder", "goal", "restock"];
+const DATE_LABEL: Partial<Record<Category, string>> = {
+  reminder: "Date",
+  goal: "Due date",
+  restock: "Buy on",
+};
 
 const DAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"];
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -72,11 +82,13 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
   const editingRecurring = Boolean(editing && editing.recurrence.type !== "once");
 
   const [title, setTitle] = useState(editing?.title ?? "");
-  const [category, setCategory] = useState<Category>(
-    editing && editing.category !== "restock" ? editing.category : "routine",
-  );
+  const [category, setCategory] = useState<Category>(editing ? editing.category : "routine");
   const [freq, setFreq] = useState<FreqKey>(editing ? freqFromRecurrence(editing) : date > today ? "tomorrow" : "today");
   const [startsOn, setStartsOn] = useState<ISODate>(editing ? (editing.recurrence.type === "once" ? editing.start_date : date) : date);
+  const defaultOnceDate = (c: Category): ISODate => (c === "restock" ? comingSaturday(today) : date);
+  const [onceDate, setOnceDate] = useState<ISODate>(
+    editing && ONE_OFF.includes(editing.category) ? editing.start_date : defaultOnceDate(editing?.category ?? "routine"),
+  );
   const [birthDate, setBirthDate] = useState<ISODate>(editing?.category === "birthday" ? editing.start_date : today);
   const [days, setDays] = useState<number[]>(
     editing?.recurrence.type === "weekly" ? editing.recurrence.days : [weekday(date)],
@@ -90,10 +102,13 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
   const [showErrors, setShowErrors] = useState(false);
 
   const isBirthday = category === "birthday";
-  const repeats = !isBirthday && freq !== "today" && freq !== "tomorrow";
+  const oneOff = ONE_OFF.includes(category);
+  const repeats = !isBirthday && !oneOff && freq !== "today" && freq !== "tomorrow";
   const scheduleDate: ISODate = isBirthday
     ? birthDate
-    : freq === "today"
+    : oneOff
+      ? onceDate
+      : freq === "today"
       ? today
       : freq === "tomorrow"
         ? addDays(today, 1)
@@ -109,6 +124,14 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
     const after = date === today ? nextSlotAfter(nowTime()) : undefined;
     return suggestSlot(slotCounts(tasks, date, undefined, (t) => timeOn(t, date)), after) ?? "09:00";
   });
+
+  const [timeTouched, setTimeTouched] = useState(Boolean(editing));
+  useEffect(() => {
+    // Until the user picks a time themselves, keep the suggestion on a free slot for the chosen day.
+    if (timeTouched) return;
+    const after = scheduleDate === today ? nextSlotAfter(nowTime()) : undefined;
+    setTime(suggestSlot(counts, after) ?? "09:00");
+  }, [scheduleDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const slotChoices = ALL_SLOTS.filter((s) => {
     const st = slotState(counts, s);
@@ -132,13 +155,14 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
       ? dayCount === 2 ? "Pick two days." : "Pick a day."
       : "",
     until: repeats && !indefinite && until < scheduleDate ? "The end date must be on or after the start." : "",
+    date: !editing && oneOff && scheduleDate < today ? "Pick today or a later date." : "",
     time: slotState(counts, time) === "full" ? "That time already has two tasks. Pick another." : "",
   };
   const hasErrors = Object.values(errors).some(Boolean);
 
   const buildRecurrence = (): Recurrence => {
     if (isBirthday) return { type: "yearly" };
-    if (!repeats) return { type: "once" };
+    if (oneOff || !repeats) return { type: "once" };
     const end = indefinite ? null : until;
     if (freq === "weekly" || freq === "twice_weekly") {
       return { type: "weekly", days: [...days].sort((a, b) => a - b), until: end };
@@ -191,6 +215,7 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
               onClick={() => {
                 setCategory(c.key);
                 if (c.key === "birthday") setGcal(true);
+                if (ONE_OFF.includes(c.key)) setOnceDate(defaultOnceDate(c.key));
               }}
             >
               {c.label}
@@ -212,7 +237,22 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
         </Field>
       ) : null}
 
-      {isBirthday ? (
+      {oneOff ? (
+        <Field
+          label={DATE_LABEL[category] ?? "Date"}
+          htmlFor={`${uid}-once`}
+          error={showErrors ? errors.date : ""}
+          hint={category === "restock" ? "Defaults to the coming Saturday. It stays on your list each day until you tick it off." : undefined}
+        >
+          <input
+            id={`${uid}-once`}
+            type="date"
+            value={onceDate}
+            onChange={(e) => e.target.value && setOnceDate(e.target.value)}
+            className="input"
+          />
+        </Field>
+      ) : isBirthday ? (
         <Field label="Birthday" htmlFor={`${uid}-bday`} hint="Repeats every year.">
           <input
             id={`${uid}-bday`}
@@ -323,7 +363,11 @@ export default function TaskForm({ date, editing, onSubmit, onCancel, submitLabe
             : `Showing free slots for ${formatDayShort(scheduleDate)}.`
         }
       >
-        <select id={`${uid}-time`} value={time} onChange={(e) => setTime(e.target.value)} className="input">
+        <select id={`${uid}-time`} value={time} onChange={(e) => {
+            setTime(e.target.value);
+            setTimeTouched(true);
+          }}
+          className="input">
           {slotChoices.map((s) => (
             <option key={s} value={s}>
               {formatTime(s)}

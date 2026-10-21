@@ -21,10 +21,18 @@ export function recurrenceUntil(r: Recurrence): ISODate | null {
   return "until" in r ? r.until : null;
 }
 
-/** Does this task fall on `date`? Pure and date-only. Restock rollover is handled by the caller. */
-export function occursOn(task: Pick<Task, "start_date" | "recurrence">, date: ISODate): boolean {
+/**
+ * Does this task fall on `date`? Pure and date-only. Restock rollover is handled by the caller.
+ * `ignoreStart` answers "does the pattern hit this weekday" for days before the task began,
+ * which the weekday strip on a card uses so a task created on Wednesday still shows a full pattern.
+ */
+export function occursOn(
+  task: Pick<Task, "start_date" | "recurrence">,
+  date: ISODate,
+  opts: { ignoreStart?: boolean } = {},
+): boolean {
   const { start_date: start, recurrence: r } = task;
-  if (date < start) return false;
+  if (date < start && !opts.ignoreStart) return false;
   const until = recurrenceUntil(r);
   if (until && date > until) return false;
 
@@ -48,10 +56,11 @@ export function occursOn(task: Pick<Task, "start_date" | "recurrence">, date: IS
     case "weekends":
       return dow === 0 || dow === 6;
     case "alternate_day":
-      return diff % 2 === 0;
+      return Math.abs(diff) % 2 === 0;
     case "alternate_weekday": {
       if (dow === 0 || dow === 6) return false;
-      return weekdaysBetween(dayNumber(start), dayNumber(date)) % 2 === 0;
+      const [a, b] = date < start ? [dayNumber(date), dayNumber(start)] : [dayNumber(start), dayNumber(date)];
+      return weekdaysBetween(a, b) % 2 === 0;
     }
     case "weekly":
       return r.days.includes(dow);

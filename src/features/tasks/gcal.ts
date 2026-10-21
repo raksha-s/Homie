@@ -1,0 +1,141 @@
+import { addDays, dayNumber, fromDayNumber, minutesToTime, parseISO, timeToMinutes, todayISO, type ISODate } from "../../lib/dates";
+import { googleFetch } from "../../lib/google";
+import { occursOn } from "./recurrence";
+import type { Recurrence, Task } from "./types";
+
+const EVENTS = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
+const BYDAY = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+const DEFAULT_MINUTES = 30;
+/** Alternate-weekday has no calendar rule, so it is written as a list of dates this far ahead. */
+const RDATE_HORIZON_DAYS = 180;
+
+const compactDate = (d: ISODate) => d.replaceAll("-", "");
+const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+/** "20261021T033000Z" for a local date and time. */
+function utcStamp(date: ISODate, time: string): string {
+  return new Date(`${date}T${time}:00`).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+}
+
+function endOfDayUtc(date: ISODate): string {
+  return new Date(`${date}T23:59:59`).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+}
+
+/** First day the task really happens on or after today (or its start), which is where the event begins. */
+export function firstOccurrence(task: Pick<Task, "start_date" | "recurrence">, from: ISODate = todayISO()): ISODate {
+  // A birthday's start is the year they were born, so its calendar event begins at the next one.
+  const begin = task.recurrence.type === "yearly" && task.start_date < from ? from : task.start_date;
+  for (let i = 0; i < 400; i++) {
+    const d = addDays(begin, i);
+    if (occursOn(task, d)) return d;
+  }
+  return task.start_date;
+}
+
+export function recurrenceLines(task: Task, first: ISODate, allDay: boolean): string[] | undefined {
+  const r: Recurrence = task.recurrence;
+  if (r.type === "once") return undefined;
+  const until = "until" in r ? r.until : null;
+  const untilPart = until ? `;UNTIL=${allDay ? compactDate(until) : endOfDayUtc(until)}` : "";
+  const tz = timeZone();
+
+  switch (r.type) {
+    case "yearly":
+      return ["RRULE:FREQ=YEARLY"];
+    case "daily":
+      return [`RRULE:FREQ=DAILY${untilPart}`];
+    case "alternate_day":
+      return [`RRULE:FREQ=DAILY;INTERVAL=2${untilPart}`];
+    case "weekdays":
+      return [`RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR${untilPart}`];
+    case "weekends":
+      return [`RRULE:FREQ=WEEKLY;BYDAY=SA,SU${untilPart}`];
+    case "weekly":
+      return [`RRULE:FREQ=WEEKLY;BYDAY=${r.days.map((d) => BYDAY[d]).join(",")}${untilPart}`];
+    case "monthly":
+      return [`RRULE:FREQ=MONTHLY;BYMONTHDAY=${parseISO(task.start_date).d}${untilPart}`];
+    case "alternate_weekday": {
+      const dates: string[] = [];
+      const last = until && until < addDays(first, RDATE_HORIZON_DAYS) ? until : addDays(first, RDATE_HORIZON_DAYS);
+      for (let n = dayNumber(first) + 1; n <= dayNumber(last); n++) {
+        const d = fromDayNumber(n);
+        if (occursOn(task, d)) dates.push(`${compactDate(d)}T${(task.time ?? "09:00").replace(":", "")}00`);
+      }
+      return dates.length ? [`RDATE;TZID=${tz}:${dates.join(",")}`] : undefined;
+    }
+  }
+}
+
+/** The Google Calendar event body for a task. Pure, so it can be tested without calling Google. */
+export function buildEvent(task: Task, today: ISODate = todayISO()): Record<string, unknown> {
+  const allDay = task.category === "birthday" || !task.time;
+  const first = firstOccurrence(task, today);
+  const tz = timeZone();
+  const body: Record<string, unknown> = {
+    summary: task.title,
+    description: task.target ? `Target: ${task.target}\n\nAdded by Homie` : "Added by Homie",
+    extendedProperties: { private: { homieTaskId: task.id } },
+  };
+
+  if (allDay) {
+    body.start = { date: first };
+    body.end = { date: addDays(first, 1) };
+  } else {
+    const time = task.time as string;
+    const endMinutes = timeToMinutes(time) + DEFAULT_MINUTES;
+    body.start = { dateTime: `${first}T${time}:00`, timeZone: tz };
+    body.end = { dateTime: `${first}T${minutesToTime(Math.min(endMinutes, 23 * 60 + 59))}:00`, timeZone: tz };
+    body.reminders =
+      task.category === "reminder"
+        ? { useDefault: false, overrides: [{ method: "popup", minutes: 0 }] }
+        : { useDefault: true };
+  }
+
+  const recurrence = recurrenceLines(task, first, allDay);
+  if (recurrence) body.recurrence = recurrence;
+  return body;
+}
+
+async function check(res: Response, what: string): Promise<Response> {
+  if (res.ok) return res;
+  let detail = "";
+  try {
+    detail = ((await res.json()) as { error?: { message?: string } }).error?.message ?? "";
+  } catch {
+    /* no body */
+  }
+  throw new Error(`${what} failed (${res.status})${detail ? `: ${detail}` : ""}`);
+}
+
+export async function createEvent(token: string, task: Task): Promise<string> {
+  const res = await check(
+    await googleFetch(token, EVENTS, { method: "POST", body: JSON.stringify(buildEvent(task)) }),
+    "Adding to Google Calendar",
+  );
+  return ((await res.json()) as { id: string }).id;
+}
+
+export async function updateEvent(token: string, eventId: string, task: Task): Promise<void> {
+  const res = await googleFetch(token, `${EVENTS}/${encodeURIComponent(eventId)}`, {
+    method: "PUT",
+    body: JSON.stringify(buildEvent(task)),
+  });
+  if (res.status === 404 || res.status === 410) return;
+  await check(res, "Updating Google Calendar");
+}
+
+export async function deleteEvent(token: string, eventId: string): Promise<void> {
+  const res = await googleFetch(token, `${EVENTS}/${encodeURIComponent(eventId)}`, { method: "DELETE" });
+  if (res.status === 404 || res.status === 410) return;
+  await check(res, "Removing from Google Calendar");
+}
+
+/** Remove a single day from a repeating event. */
+export async function deleteInstance(token: string, eventId: string, task: Task, date: ISODate): Promise<void> {
+  const allDay = task.category === "birthday" || !task.time;
+  const suffix = allDay ? compactDate(date) : utcStamp(date, task.time as string);
+  const res = await googleFetch(token, `${EVENTS}/${encodeURIComponent(`${eventId}_${suffix}`)}`, { method: "DELETE" });
+  if (res.status === 404 || res.status === 410) return;
+  await check(res, "Removing that day from Google Calendar");
+}
+

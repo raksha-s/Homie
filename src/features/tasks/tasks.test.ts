@@ -1,4 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from "vitest";
+import { buildEvent } from "./gcal";
 import { occursOn } from "./recurrence";
 import { ALL_SLOTS, nextSlotAfter, slotCounts, slotState, suggestSlot } from "./slots";
 import type { Recurrence, Task } from "./types";
@@ -97,6 +99,27 @@ describe("occursOn", () => {
   });
 });
 
+describe("weekday strip", () => {
+  it("shows the whole pattern even for days before the task started", () => {
+    // Created on Wednesday 21 Oct, so Sun to Tue of that week are before the start.
+    const task = t("2026-10-21", { type: "daily", until: null });
+    expect(occursOn(task, "2026-10-19")).toBe(false);
+    expect(occursOn(task, "2026-10-19", { ignoreStart: true })).toBe(true);
+    const mon = t("2026-10-21", { type: "weekly", days: [1], until: null });
+    expect(occursOn(mon, "2026-10-19", { ignoreStart: true })).toBe(true);
+    expect(occursOn(mon, "2026-10-20", { ignoreStart: true })).toBe(false);
+  });
+
+  it("keeps alternate patterns consistent before the start", () => {
+    const alt = t("2026-10-21", { type: "alternate_day", until: null });
+    expect(occursOn(alt, "2026-10-19", { ignoreStart: true })).toBe(true);
+    expect(occursOn(alt, "2026-10-20", { ignoreStart: true })).toBe(false);
+    const altWd = t("2026-10-21", { type: "alternate_weekday", until: null });
+    expect(occursOn(altWd, "2026-10-20", { ignoreStart: true })).toBe(false); // Tue, one weekday before
+    expect(occursOn(altWd, "2026-10-19", { ignoreStart: true })).toBe(true); // Mon, two weekdays before
+  });
+});
+
 describe("slots", () => {
   it("covers 06:00 to 23:00 in 30 minute steps", () => {
     expect(ALL_SLOTS[0]).toBe("06:00");
@@ -135,5 +158,50 @@ describe("slots", () => {
     expect(nextSlotAfter("09:30")).toBe("09:30");
     expect(nextSlotAfter("03:10")).toBe("06:00");
     expect(nextSlotAfter("23:40")).toBe("23:00");
+  });
+});
+
+describe("Google Calendar events", () => {
+  const task = (over: Partial<Task>) => t("2026-10-21", { type: "once" }, over);
+
+  it("builds a timed one-off event", () => {
+    const e = buildEvent(task({ title: "Call plumber", time: "09:00", category: "reminder" }), "2026-10-21") as any;
+    expect(e.summary).toBe("Call plumber");
+    expect(e.start.dateTime).toBe("2026-10-21T09:00:00");
+    expect(e.end.dateTime).toBe("2026-10-21T09:30:00");
+    expect(e.recurrence).toBeUndefined();
+    expect(e.reminders.overrides[0].minutes).toBe(0);
+  });
+
+  it("starts a weekly event on the first matching day", () => {
+    // Wednesday start, repeats Mondays: first event is Monday 26 Oct.
+    const e = buildEvent(task({ recurrence: { type: "weekly", days: [1], until: null } }), "2026-10-21") as any;
+    expect(e.start.dateTime).toBe("2026-10-26T09:00:00");
+    expect(e.recurrence).toEqual(["RRULE:FREQ=WEEKLY;BYDAY=MO"]);
+  });
+
+  it("maps simple repeats to calendar rules", () => {
+    const rule = (r: Recurrence) => (buildEvent(task({ recurrence: r }), "2026-10-21") as any).recurrence?.[0];
+    expect(rule({ type: "daily", until: null })).toBe("RRULE:FREQ=DAILY");
+    expect(rule({ type: "alternate_day", until: null })).toBe("RRULE:FREQ=DAILY;INTERVAL=2");
+    expect(rule({ type: "weekdays", until: null })).toBe("RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR");
+    expect(rule({ type: "weekends", until: null })).toBe("RRULE:FREQ=WEEKLY;BYDAY=SA,SU");
+    expect(rule({ type: "monthly", until: null })).toBe("RRULE:FREQ=MONTHLY;BYMONTHDAY=21");
+    expect(rule({ type: "daily", until: "2026-12-31" })).toMatch(/^RRULE:FREQ=DAILY;UNTIL=\d{8}T\d{6}Z$/);
+  });
+
+  it("writes alternate weekdays as a date list", () => {
+    const e = buildEvent(task({ recurrence: { type: "alternate_weekday", until: "2026-10-27" } }), "2026-10-21") as any;
+    expect(e.recurrence[0]).toMatch(/^RDATE;TZID=.+:20261023T090000,20261027T090000$/);
+  });
+
+  it("makes birthdays all-day and yearly, starting at the next one", () => {
+    const e = buildEvent(
+      task({ category: "birthday", start_date: "1995-05-12", recurrence: { type: "yearly" } }),
+      "2026-10-21",
+    ) as any;
+    expect(e.start).toEqual({ date: "2027-05-12" });
+    expect(e.end).toEqual({ date: "2027-05-13" });
+    expect(e.recurrence).toEqual(["RRULE:FREQ=YEARLY"]);
   });
 });

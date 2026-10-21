@@ -13,6 +13,7 @@ import { slotCounts, slotState } from "../features/tasks/slots";
 import { useTasks, type EditScope, type TaskInstance } from "../features/tasks/TasksProvider";
 import type { NewTask } from "../features/tasks/types";
 import { addDays, formatDay, todayISO } from "../lib/dates";
+import { googleConfigured } from "../lib/google";
 
 export const mainTabs = [
   { to: "/main/tasks", label: "My Tasks" },
@@ -81,9 +82,12 @@ export default function TasksPage() {
     const ok = await run(() => t.createTask(input));
     if (!ok) return;
     setAdding(false);
-    setNotice(`Added "${input.title}"`);
-    // Make the new task visible if it does not land on the day being viewed.
-    if (input.recurrence.type === "once" && input.start_date !== date) goTo(input.start_date);
+    // Stay where you are. If the task landed on another day, say which one.
+    setNotice(
+      input.recurrence.type === "once" && input.start_date !== date
+        ? `Added "${input.title}" for ${formatDay(input.start_date)}`
+        : `Added "${input.title}"`,
+    );
   };
 
   const handleModifySubmit = async (inst: TaskInstance, next: NewTask) => {
@@ -158,6 +162,22 @@ export default function TasksPage() {
           <span>Could not save that: {t.actionError}</span>
           <button type="button" onClick={t.clearActionError} className="font-semibold underline">
             Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      {t.pendingGcal.length > 0 && googleConfigured ? (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-[var(--radius-control)] border border-line bg-surface p-3 text-sm">
+          <span>
+            {t.pendingGcal.length} {t.pendingGcal.length === 1 ? "task is" : "tasks are"} waiting to be added to Google
+            Calendar.
+          </span>
+          <button
+            type="button"
+            className="btn-primary !min-h-10 shrink-0 !px-3 text-sm"
+            onClick={() => void run(() => t.syncPendingGcal(), "Google Calendar updated")}
+          >
+            Add now
           </button>
         </div>
       ) : null}

@@ -83,3 +83,8 @@ export function formatDayShort(iso: ISODate): string {
   const { y, m, d } = parseISO(iso);
   return `${d} ${MONTHS_SHORT[m - 1]} ${y}`;
 }
+
+/** The Saturday to shop on: today if it is Saturday, otherwise the next one. */
+export function comingSaturday(from: ISODate): ISODate {
+  return addDays(from, (6 - weekday(from) + 7) % 7);
+}

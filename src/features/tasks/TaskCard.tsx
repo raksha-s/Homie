@@ -57,7 +57,7 @@ export default function TaskCard(p: Props) {
 
   // Which weekdays this task lands on in the viewed week, for the S M T W T F S strip.
   const weekStart = startOfWeek(date);
-  const strip = DAY_LETTERS.map((_, i) => occursOn(task, addDays(weekStart, i)));
+  const strip = DAY_LETTERS.map((_, i) => occursOn(task, addDays(weekStart, i), { ignoreStart: true }));
   const stripLabel = strip
     .map((on, i) => (on ? DAY_NAMES[i].slice(0, 3) : null))
     .filter(Boolean)

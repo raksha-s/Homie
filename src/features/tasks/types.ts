@@ -43,7 +43,7 @@ export type Occurrence = {
 export const CATEGORY_LABEL: Record<Category, string> = {
   routine: "Daily routine",
   reminder: "Reminder",
-  restock: "Restock",
+  restock: "Shopping List",
   birthday: "Birthday",
   goal: "Goal",
 };

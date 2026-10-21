@@ -11,6 +11,8 @@ import {
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../auth/AuthProvider";
 import { addDays, nowTime, normTime, todayISO, type ISODate } from "../../lib/dates";
+import { googleConfigured, loadGoogle, requestGoogleToken } from "../../lib/google";
+import { createEvent, deleteEvent, deleteInstance, updateEvent } from "./gcal";
 import { occursOn } from "./recurrence";
 import type { NewTask, Occurrence, OccurrenceStatus, Recurrence, Task } from "./types";
 
@@ -44,6 +46,9 @@ type Ctx = {
   moveTime: (task: Task, date: ISODate, time: string) => Promise<boolean>;
   modifyTask: (task: Task, date: ISODate, scope: EditScope, next: NewTask) => Promise<boolean>;
   deleteTask: (task: Task, date: ISODate, scope: EditScope) => Promise<boolean>;
+  /** Tasks ticked for Google Calendar that never reached it (for example when Google was not connected). */
+  pendingGcal: Task[];
+  syncPendingGcal: () => Promise<boolean>;
 };
 
 const TasksContext = createContext<Ctx | null>(null);
@@ -213,11 +218,12 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     return task;
   };
 
-  const patchTask = async (id: string, patch: Partial<NewTask>) => {
+  const patchTask = async (id: string, patch: Partial<NewTask>): Promise<Task> => {
     const { data, error } = await supabase.from("tasks").update(patch).eq("id", id).select().single();
     if (error) throw error;
     const task = rowToTask(data);
     setTasks((prev) => prev.map((t) => (t.id === id ? task : t)));
+    return task;
   };
 
   const upsertOcc = async (taskId: string, date: ISODate, fields: Partial<Occurrence>) => {
@@ -239,6 +245,40 @@ export function TasksProvider({ children }: { children: ReactNode }) {
   const endSeriesBefore = (task: Task, date: ISODate): Recurrence =>
     ({ ...task.recurrence, until: addDays(date, -1) }) as Recurrence;
 
+  // Google's window can only open straight from a tap, so the token is requested first thing in a
+  // mutation, before any network call, and the calendar work happens once it arrives.
+  useEffect(() => {
+    if (googleConfigured) void loadGoogle().catch(() => undefined);
+  }, []);
+
+  const startToken = (): Promise<string | Error> =>
+    requestGoogleToken(session?.user.email ?? undefined).catch((e: unknown) =>
+      e instanceof Error ? e : new Error(String(e)),
+    );
+
+  /** Calendar trouble never loses the task: it is saved first, and the problem is shown clearly. */
+  const withGcal = async (tok: Promise<string | Error>, what: string, fn: (token: string) => Promise<void>) => {
+    const t = await tok;
+    if (t instanceof Error) {
+      setActionError(`${what}: ${t.message}`);
+      return;
+    }
+    try {
+      await fn(t);
+    } catch (e) {
+      setActionError(`${what}: ${describe(e)}`);
+    }
+  };
+
+  const addToCalendar = async (token: string, task: Task) => {
+    const id = await createEvent(token, task);
+    await patchTask(task.id, { gcal_event_id: id });
+  };
+
+  const pendingGcal = tasks.filter(
+    (t) => t.add_to_gcal && !t.gcal_event_id && (t.recurrence.type !== "once" || t.start_date >= today),
+  );
+
   const value: Ctx = {
     tasks,
     loading,
@@ -253,41 +293,97 @@ export function TasksProvider({ children }: { children: ReactNode }) {
     dueReminders,
     silence,
     isSilenced,
-    createTask: (input) => attempt(async () => void (await insertTask(input))),
+    pendingGcal,
+    syncPendingGcal: () => {
+      const tok = startToken();
+      const list = pendingGcal;
+      return attempt(() =>
+        withGcal(tok, "Could not add to Google Calendar", async (token) => {
+          for (const task of list) await addToCalendar(token, task);
+        }),
+      );
+    },
+    createTask: (input) => {
+      const tok = input.add_to_gcal ? startToken() : null;
+      return attempt(async () => {
+        const task = await insertTask(input);
+        if (tok) await withGcal(tok, "Saved, but not added to Google Calendar", (token) => addToCalendar(token, task));
+      });
+    },
     setStatus: (task, date, status) => attempt(() => upsertOcc(task.id, date, { status })),
-    moveTime: (task, date, time) =>
-      attempt(async () => {
+    moveTime: (task, date, time) => {
+      const once = task.recurrence.type === "once";
+      const tok = once && task.gcal_event_id ? startToken() : null;
+      return attempt(async () => {
         // A one-off task owns its time. A recurring task only moves for this one day.
-        if (task.recurrence.type === "once") await patchTask(task.id, { time });
-        else await upsertOcc(task.id, date, { time_override: time });
-      }),
-    modifyTask: (task, date, scope, next) =>
-      attempt(async () => {
-        const inPlace = task.recurrence.type === "once" || task.recurrence.type === "yearly" || task.category === "restock";
+        if (!once) {
+          await upsertOcc(task.id, date, { time_override: time });
+          return;
+        }
+        const moved = await patchTask(task.id, { time });
+        if (tok) {
+          await withGcal(tok, "Moved here, but Google Calendar was not updated", (token) =>
+            updateEvent(token, moved.gcal_event_id as string, moved),
+          );
+        }
+      });
+    },
+    modifyTask: (task, date, scope, next) => {
+      const tok = task.gcal_event_id || next.add_to_gcal ? startToken() : null;
+      const sorry = "Saved, but Google Calendar was not updated";
+      return attempt(async () => {
+        const inPlace =
+          task.recurrence.type === "once" || task.recurrence.type === "yearly" || task.category === "restock";
         if (inPlace || (scope === "future" && date === task.start_date)) {
-          await patchTask(task.id, next);
+          const updated = await patchTask(task.id, next);
+          if (!tok) return;
+          await withGcal(tok, sorry, async (token) => {
+            if (updated.add_to_gcal && updated.gcal_event_id) await updateEvent(token, updated.gcal_event_id, updated);
+            else if (updated.add_to_gcal) await addToCalendar(token, updated);
+            else if (updated.gcal_event_id) {
+              await deleteEvent(token, updated.gcal_event_id);
+              await patchTask(updated.id, { gcal_event_id: null });
+            }
+          });
           return;
         }
         if (scope === "only") {
           await upsertOcc(task.id, date, { status: "skipped" });
-          await insertTask({ ...next, start_date: date, recurrence: { type: "once" } });
+          const created = await insertTask({ ...next, start_date: date, recurrence: { type: "once" }, gcal_event_id: null });
+          if (!tok) return;
+          await withGcal(tok, sorry, async (token) => {
+            if (task.gcal_event_id) await deleteInstance(token, task.gcal_event_id, task, date);
+            if (created.add_to_gcal) await addToCalendar(token, created);
+          });
           return;
         }
-        await patchTask(task.id, { recurrence: endSeriesBefore(task, date) });
-        await insertTask({ ...next, start_date: date });
-      }),
-    deleteTask: (task, date, scope) =>
-      attempt(async () => {
+        const ended = await patchTask(task.id, { recurrence: endSeriesBefore(task, date) });
+        const created = await insertTask({ ...next, start_date: date, gcal_event_id: null });
+        if (!tok) return;
+        await withGcal(tok, sorry, async (token) => {
+          if (ended.gcal_event_id) await updateEvent(token, ended.gcal_event_id, ended);
+          if (created.add_to_gcal) await addToCalendar(token, created);
+        });
+      });
+    },
+    deleteTask: (task, date, scope) => {
+      const tok = task.gcal_event_id ? startToken() : null;
+      const sorry = "Deleted here, but Google Calendar was not updated";
+      return attempt(async () => {
         const wholeTask =
           task.recurrence.type === "once" || task.recurrence.type === "yearly" || task.category === "restock";
         if (wholeTask || (scope === "future" && date === task.start_date)) {
           await removeTask(task.id);
+          if (tok) await withGcal(tok, sorry, (token) => deleteEvent(token, task.gcal_event_id as string));
         } else if (scope === "only") {
           await upsertOcc(task.id, date, { status: "skipped" });
+          if (tok) await withGcal(tok, sorry, (token) => deleteInstance(token, task.gcal_event_id as string, task, date));
         } else {
-          await patchTask(task.id, { recurrence: endSeriesBefore(task, date) });
+          const ended = await patchTask(task.id, { recurrence: endSeriesBefore(task, date) });
+          if (tok) await withGcal(tok, sorry, (token) => updateEvent(token, task.gcal_event_id as string, ended));
         }
-      }),
+      });
+    },
   };
 
   return <TasksContext.Provider value={value}>{children}</TasksContext.Provider>;
