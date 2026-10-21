@@ -36,9 +36,9 @@ export default function PlanReview({ onPublish, busy }: { onPublish: () => void;
       ) : null}
 
       <div className="mt-4 flex gap-3">
-        <button type="button" className="btn-secondary inline-flex flex-1 items-center justify-center gap-2" onClick={k.shuffle}>
+        <button type="button" className="btn-secondary inline-flex flex-1 items-center justify-center gap-2" onClick={() => void k.shuffle()} disabled={k.planning}>
           <Shuffle size={18} aria-hidden="true" />
-          Shuffle
+          {k.planning ? "Planning…" : "Shuffle"}
         </button>
         <button type="button" disabled={busy || !draft.items.length} className="btn-primary flex-1" onClick={onPublish}>
           {busy ? "Publishing…" : "Publish"}

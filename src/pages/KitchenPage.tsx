@@ -6,6 +6,7 @@ import SubTabs from "../components/SubTabs";
 import { formatDay } from "../lib/dates";
 import { useKitchen } from "../features/kitchen/KitchenProvider";
 import FoodSheet from "../features/kitchen/FoodSheet";
+import GeminiSheet from "../features/kitchen/GeminiSheet";
 import MealPicker from "../features/kitchen/MealPicker";
 import PlanReview from "../features/kitchen/PlanReview";
 import { planWindow } from "../features/kitchen/window";
@@ -131,6 +132,7 @@ function PlanTab({ onPublished }: { onPublished: () => void }) {
   const k = useKitchen();
   const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [aiSetup, setAiSetup] = useState(false);
   const win = useMemo(() => (picking ? planWindow() : null), [picking]);
 
   if (k.foods.filter((f) => f.type === "dish").length === 0 && !k.draft) {
@@ -157,10 +159,17 @@ function PlanTab({ onPublished }: { onPublished: () => void }) {
 
   return (
     <>
-      <button type="button" className="btn-primary w-full" onClick={() => setPicking(true)}>
-        Make meal plan
+      <button type="button" disabled={k.planning} className="btn-primary w-full" onClick={() => setPicking(true)}>
+        {k.planning ? (k.geminiKey ? "Asking Gemini…" : "Planning…") : "Make meal plan"}
       </button>
-      <p className="mt-2 text-sm text-muted">Runs in the app, so it costs nothing. You review it before it goes to My Tasks.</p>
+      <p className="mt-2 text-sm text-muted">
+        {k.geminiKey ? "Gemini suggests the week and Homie checks it against your rules. " : "Runs in the app, so it costs nothing. "}
+        You review it before it goes to My Tasks.
+      </p>
+      <button type="button" className="pressable mt-1 min-h-11 text-sm font-medium text-accent-strong underline" onClick={() => setAiSetup(true)}>
+        {k.geminiKey ? "Free AI is on. Change or turn off" : "Set up free AI (optional)"}
+      </button>
+      <GeminiSheet open={aiSetup} onClose={() => setAiSetup(false)} />
 
       <PublishedPlan items={k.published} foods={k.foods} />
 
@@ -169,7 +178,7 @@ function PlanTab({ onPublished }: { onPublished: () => void }) {
         initial={win?.days ?? []}
         onClose={() => setPicking(false)}
         onGenerate={(days) => {
-          k.makePlan(days);
+          void k.makePlan(days);
           setPicking(false);
         }}
       />

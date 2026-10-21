@@ -195,3 +195,72 @@ describe("planWindow", () => {
     expect(days).toEqual([{ date: "2026-10-24", meals: ["dinner"] }]);
   });
 });
+
+import { parseSuggestion, planWithGemini } from "./ai";
+
+describe("Gemini layer", () => {
+  const foods = [
+    food("dish", "Dosa", ["breakfast", "dinner"], []),
+    food("dish", "Dal rice", ["lunch", "dinner"], []),
+    food("dish", "Pulav", ["lunch"], ["heavy"]),
+    food("fruit", "Banana"),
+  ];
+  const days: DayRequest[] = [
+    { date: WEEK[1], meals: ["breakfast", "lunch"] },
+    { date: WEEK[2], meals: ["breakfast", "lunch"] },
+  ];
+  const id = (name: string) => foods.find((f) => f.name === name)!.id;
+  const reply = (items: object[]) =>
+    ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: JSON.stringify({ items }) }] } }] }) }) as Response;
+  const run = (fetchImpl: typeof fetch, key = "k") => planWithGemini({ key, foods, days, seed: 1, fetchImpl });
+
+  const good = [
+    { date: WEEK[1], meal: "breakfast", food: "Dosa" },
+    { date: WEEK[1], meal: "breakfast", food: "Banana" },
+    { date: WEEK[1], meal: "lunch", food: "Dal rice" },
+    { date: WEEK[2], meal: "breakfast", food: "dosa" },
+    { date: WEEK[2], meal: "breakfast", food: "Banana" },
+    { date: WEEK[2], meal: "lunch", food: "Pulav" },
+  ];
+
+  it("uses Gemini's plan when it follows the rules", async () => {
+    const out = await run(async () => reply(good));
+    expect(out.source).toBe("ai");
+    expect(out.items).toHaveLength(6);
+    expect(out.items[3].food_id).toBe(id("Dosa"));
+  });
+
+  it("falls back to the built-in plan when Gemini breaks a rule", async () => {
+    const bad = good.map((g, i) => (i === 2 ? { ...g, food: "Pulav" } : g)).map((g, i) => (i === 5 ? { ...g, food: "Pulav" } : g));
+    const out = await run(async () => reply(bad)); // heavy Pulav two days running
+    expect(out.source).toBe("rules");
+    expect(out.note).toMatch(/broke some of your rules/);
+    expect(checkPlan(foods, days, out.items).hard).toEqual([]);
+  });
+
+  it("falls back on a rate limit, a bad key, junk and a network failure", async () => {
+    for (const status of [429, 403]) {
+      const out = await run(async () => ({ ok: false, status }) as Response);
+      expect(out.source).toBe("rules");
+      expect(out.note).toMatch(/could not help/);
+    }
+    const junk = await run(async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: "sure!" }] } }] }) }) as Response);
+    expect(junk.source).toBe("rules");
+    const down = await run(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    expect(down.source).toBe("rules");
+  });
+
+  it("makes no call without a key", async () => {
+    let called = false;
+    const out = await run(async () => ((called = true), reply(good)), "");
+    expect(called).toBe(false);
+    expect(out.source).toBe("rules");
+  });
+
+  it("rejects food that is not in the list", () => {
+    expect(() => parseSuggestion('{"items":[{"date":"2026-10-19","meal":"lunch","food":"Pizza"}]}', foods)).toThrow(/not in your list/);
+    expect(parseSuggestion('```json\n{"items":[{"date":"2026-10-19","meal":"lunch","food":"Pulav"}]}\n```', foods)).toHaveLength(1);
+  });
+});

@@ -4,10 +4,11 @@ import { useAuth } from "../../auth/AuthProvider";
 import { startOfWeek, todayISO, type ISODate } from "../../lib/dates";
 import { useTasks } from "../tasks/TasksProvider";
 import type { NewTask } from "../tasks/types";
-import { checkPlan, generatePlan } from "./planner";
+import { loadGeminiKey, planWithGemini, saveGeminiKey, type PlanSource } from "./ai";
+import { checkPlan } from "./planner";
 import { MEALS, MEAL_LABEL, MEAL_TIME, type DayRequest, type Food, type Meal, type PlanCheck, type PlanItem } from "./types";
 
-export type Draft = { days: DayRequest[]; items: PlanItem[]; seed: number; note: string | null };
+export type Draft = { days: DayRequest[]; items: PlanItem[]; seed: number; note: string | null; source: PlanSource };
 export type FoodInput = Pick<Food, "type" | "name" | "meals" | "preferences">;
 
 type Ctx = {
@@ -22,10 +23,13 @@ type Ctx = {
   deleteFood: (id: string) => Promise<boolean>;
   draft: Draft | null;
   check: PlanCheck | null;
-  /** Builds a plan with the built-in rules. */
-  makePlan: (days: DayRequest[]) => void;
+  /** Builds a plan: with Gemini when a key is saved, otherwise (or if Gemini fails) with the built-in rules. */
+  makePlan: (days: DayRequest[]) => Promise<void>;
+  planning: boolean;
+  geminiKey: string;
+  setGeminiKey: (key: string) => void;
   setDraft: (d: Draft | null) => void;
-  shuffle: () => void;
+  shuffle: () => Promise<void>;
   changeItem: (index: number, foodId: string) => void;
   removeItem: (index: number) => void;
   addItem: (date: ISODate, meal: Meal, foodId: string) => void;
@@ -48,6 +52,8 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [geminiKey, setKey] = useState(loadGeminiKey);
 
   const reload = useCallback(async () => {
     if (!userId) return;
@@ -115,14 +121,28 @@ export function KitchenProvider({ children }: { children: ReactNode }) {
       }),
     draft,
     check,
-    makePlan: (days) => setDraft({ days, items: generatePlan(foods, days, 1).items, seed: 1, note: null }),
+    planning,
+    geminiKey,
+    setGeminiKey: (key) => {
+      const k = key.trim();
+      saveGeminiKey(k);
+      setKey(k);
+    },
+    makePlan: async (days) => {
+      setPlanning(true);
+      const out = await planWithGemini({ key: geminiKey, foods, days, seed: 1 });
+      setDraft({ days, items: out.items, seed: 1, note: out.note, source: out.source });
+      setPlanning(false);
+    },
     setDraft,
-    shuffle: () =>
-      setDraft((d) => {
-        if (!d) return d;
-        const seed = d.seed + 1;
-        return { ...d, seed, items: generatePlan(foods, d.days, seed).items, note: null };
-      }),
+    shuffle: async () => {
+      if (!draft) return;
+      const seed = draft.seed + 1;
+      setPlanning(true);
+      const out = await planWithGemini({ key: draft.source === "ai" ? geminiKey : "", foods, days: draft.days, seed });
+      setDraft({ ...draft, seed, items: out.items, note: out.note, source: draft.source === "ai" && out.source === "rules" ? "rules" : out.source });
+      setPlanning(false);
+    },
     changeItem: (index, foodId) => edit((items) => items.map((it, i) => (i === index ? { ...it, food_id: foodId } : it))),
     removeItem: (index) => edit((items) => items.filter((_, i) => i !== index)),
     addItem: (date, meal, foodId) => edit((items) => [...items, { date, meal, food_id: foodId }]),
