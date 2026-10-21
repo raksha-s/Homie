@@ -19,6 +19,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isConfigured) return;
+    // Supabase reports failed sign-ins in the query string; show it, then tidy the address bar.
+    const params = new URLSearchParams(window.location.search);
+    const failure = params.get("error_description") ?? params.get("error");
+    if (failure) {
+      setError(failure.replace(/\+/g, " "));
+      window.history.replaceState(null, "", window.location.pathname + window.location.hash);
+    }
     supabase.auth.getSession().then(({ data, error: e }) => {
       if (e) setError(e.message);
       setSession(data.session);
