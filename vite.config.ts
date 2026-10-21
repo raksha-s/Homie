@@ -2,12 +2,23 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { execSync } from "node:child_process";
+
+// Shown at the bottom of the app so you can tell which version a phone is running.
+const build = (() => {
+  try {
+    return execSync("git rev-parse --short HEAD").toString().trim();
+  } catch {
+    return "dev";
+  }
+})();
 
 // The app is served from https://raksha-s.github.io/Homie/, so every asset lives under /Homie/.
 const base = "/Homie/";
 
 export default defineConfig({
   base,
+  define: { __BUILD__: JSON.stringify(build) },
   plugins: [
     react(),
     tailwindcss(),

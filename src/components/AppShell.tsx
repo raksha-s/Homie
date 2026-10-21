@@ -1,5 +1,6 @@
 import { Outlet } from "react-router-dom";
 import BottomNav from "./BottomNav";
+import VersionFooter from "./VersionFooter";
 import { TasksProvider } from "../features/tasks/TasksProvider";
 import { InventoryProvider } from "../features/inventory/InventoryProvider";
 
@@ -14,6 +15,7 @@ export default function AppShell() {
         style={{ paddingBottom: "calc(var(--nav-height) + env(safe-area-inset-bottom, 0px) + 96px)" }}
       >
         <Outlet />
+        <VersionFooter />
       </main>
       <BottomNav />
     </div>
