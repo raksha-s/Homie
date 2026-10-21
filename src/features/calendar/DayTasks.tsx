@@ -3,21 +3,32 @@ import { formatTime } from "../../lib/dates";
 import type { TaskInstance } from "../tasks/TasksProvider";
 import { CATEGORY_LABEL } from "../tasks/types";
 
-/** A day's tasks with a tick on each, for the calendar. Done tasks sit back a little. */
+/**
+ * A day's tasks with a tick on each, for the calendar. Done tasks sit back a little.
+ * `framed` gives each task its own bordered container (used where the list sits on the page);
+ * unframed rows are separated by hairlines (used inside a day card, so frames never nest).
+ */
 export default function DayTasks({
   instances,
   onToggle,
+  framed = false,
 }: {
   instances: TaskInstance[];
   onToggle: (i: TaskInstance) => void;
+  framed?: boolean;
 }) {
   return (
-    <ul className="flex flex-col">
+    <ul className={framed ? "flex flex-col gap-2" : "flex flex-col divide-y divide-line"}>
       {instances.map((i) => {
         const done = i.status === "done";
         const skipped = i.status === "skipped";
         return (
-          <li key={i.task.id} className="flex items-center gap-1">
+          <li
+            key={i.task.id}
+            className={`flex items-center gap-1 ${
+              framed ? "rounded-xl border border-line bg-surface py-1 pl-1 pr-3" : ""
+            }`}
+          >
             {skipped ? (
               <span className="size-11 shrink-0" aria-hidden="true" />
             ) : (

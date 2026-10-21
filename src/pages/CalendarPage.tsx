@@ -259,7 +259,7 @@ function DayPanel({
         </button>
       </div>
       {instances.length ? (
-        <DayTasks instances={instances} onToggle={onToggle} />
+        <DayTasks framed instances={instances} onToggle={onToggle} />
       ) : (
         <p className="rounded-[var(--radius-card)] border border-dashed border-line px-4 py-6 text-center text-sm text-muted">
           Nothing planned for this day. Open the day to add a task.

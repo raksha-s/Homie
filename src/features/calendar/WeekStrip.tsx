@@ -1,14 +1,12 @@
 import { useRef, type TouchEvent } from "react";
 import { addDays, formatDay, parseISO, startOfWeek, type ISODate } from "../../lib/dates";
-import Dots from "./Dots";
 import { describeDay, type DayStats } from "./dayStats";
 import Ring from "./Ring";
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 /**
- * The week at the top of My Tasks: weekday, a ring of progress around the date, and a dot for the
- * kinds of task on that day. The chosen day sits on a raised card. Swipe sideways for another week.
+ * The week at the top of My Tasks: weekday, a ring of progress around the date. The chosen day sits on a raised card. Swipe sideways for another week.
  */
 export default function WeekStrip({
   selected,
@@ -61,7 +59,7 @@ export default function WeekStrip({
             aria-current={isToday ? "date" : undefined}
             aria-label={describeDay(`${formatDay(d)}${isToday ? ", today" : ""}`, s, d > today)}
             onClick={() => onSelect(d)}
-            className={`pressable flex min-h-[84px] flex-col items-center gap-1 rounded-2xl px-0.5 py-2 ${
+            className={`pressable flex min-h-[80px] flex-col items-center gap-1 rounded-2xl px-0.5 py-2 ${
               isSel ? "bg-surface shadow-[var(--shadow)]" : ""
             }`}
           >
@@ -69,11 +67,8 @@ export default function WeekStrip({
               {isToday ? "Today" : WEEKDAY_SHORT[i]}
             </span>
             <Ring percent={s.percent} size={44} dim={!isSel}>
-              <span className="flex flex-col items-center leading-none">
-                <Dots categories={s.categories.slice(0, 3)} size={5} />
-                <span className={`mt-1 text-base tabular-nums ${isSel ? "font-bold text-ink" : "font-medium text-muted"}`}>
-                  {parseISO(d).d}
-                </span>
+              <span className={`text-base leading-none tabular-nums ${isSel ? "font-bold text-ink" : "font-medium text-muted"}`}>
+                {parseISO(d).d}
               </span>
             </Ring>
           </button>
