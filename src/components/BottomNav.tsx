@@ -1,8 +1,9 @@
 import { NavLink, useLocation } from "react-router-dom";
 import { CalendarCheck, CookingPot, Package, Wallet } from "@phosphor-icons/react";
 import type { Icon } from "@phosphor-icons/react";
+import { useTasks } from "../features/tasks/TasksProvider";
 
-type Item = { to: string; match: string; label: string; icon: Icon; badge?: number };
+type Item = { to: string; match: string; label: string; icon: Icon };
 
 const items: Item[] = [
   { to: "/main/tasks", match: "/main", label: "Main", icon: CalendarCheck },
@@ -13,6 +14,7 @@ const items: Item[] = [
 
 export default function BottomNav() {
   const { pathname } = useLocation();
+  const due = useTasks().dueReminders.length;
   return (
     <nav
       aria-label="Primary"
@@ -20,7 +22,8 @@ export default function BottomNav() {
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       <ul className="mx-auto flex max-w-[640px]" style={{ height: "var(--nav-height)" }}>
-        {items.map(({ to, match, label, icon: IconCmp, badge }) => {
+        {items.map(({ to, match, label, icon: IconCmp }) => {
+          const badge = to === "/main/tasks" ? due : 0;
           const isActive = pathname.startsWith(match);
           return (
           <li key={to} className="flex-1">
@@ -36,8 +39,9 @@ export default function BottomNav() {
                     <IconCmp size={26} weight={isActive ? "fill" : "regular"} aria-hidden="true" />
                     {badge ? (
                       <span
-                        className="absolute -right-2 -top-1 min-w-4 rounded-full bg-danger px-1 text-center text-[10px] leading-4 text-bg"
-                        aria-label={`${badge} reminders`}
+                        className="badge-beep absolute -right-2 -top-1 min-w-4 rounded-full bg-danger px-1 text-center text-[10px] font-semibold leading-4 text-bg"
+                        role="status"
+                        aria-label={`${badge} reminders due`}
                       >
                         {badge}
                       </span>

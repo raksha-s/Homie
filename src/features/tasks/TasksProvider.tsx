@@ -1,0 +1,301 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../auth/AuthProvider";
+import { addDays, nowTime, normTime, todayISO, type ISODate } from "../../lib/dates";
+import { occursOn } from "./recurrence";
+import type { NewTask, Occurrence, OccurrenceStatus, Recurrence, Task } from "./types";
+
+/** One task as it appears on one day. */
+export type TaskInstance = {
+  task: Task;
+  date: ISODate;
+  status: OccurrenceStatus;
+  /** Effective time for this day: a one-day move wins over the task's own time. */
+  time: string | null;
+};
+
+export type EditScope = "only" | "future";
+
+type Ctx = {
+  tasks: Task[];
+  loading: boolean;
+  loadError: string | null;
+  actionError: string | null;
+  clearActionError: () => void;
+  reload: () => Promise<void>;
+  ensureDay: (date: ISODate) => Promise<void>;
+  isDayLoaded: (date: ISODate) => boolean;
+  instancesOn: (date: ISODate) => TaskInstance[];
+  timeOn: (task: Task, date: ISODate) => string | null;
+  dueReminders: TaskInstance[];
+  silence: (inst: TaskInstance) => void;
+  isSilenced: (inst: TaskInstance) => boolean;
+  createTask: (input: NewTask) => Promise<boolean>;
+  setStatus: (task: Task, date: ISODate, status: OccurrenceStatus) => Promise<boolean>;
+  moveTime: (task: Task, date: ISODate, time: string) => Promise<boolean>;
+  modifyTask: (task: Task, date: ISODate, scope: EditScope, next: NewTask) => Promise<boolean>;
+  deleteTask: (task: Task, date: ISODate, scope: EditScope) => Promise<boolean>;
+};
+
+const TasksContext = createContext<Ctx | null>(null);
+
+const keyOf = (taskId: string, date: ISODate) => `${taskId}|${date}`;
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+const rowToTask = (r: any): Task => ({ ...r, time: normTime(r.time) });
+const rowToOcc = (r: any): Occurrence => ({ ...r, time_override: normTime(r.time_override) });
+
+function describe(e: unknown): string {
+  if (e && typeof e === "object" && "message" in e) return String((e as { message: unknown }).message);
+  return "Something went wrong.";
+}
+
+export function TasksProvider({ children }: { children: ReactNode }) {
+  const { session } = useAuth();
+  const userId = session?.user.id;
+
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [occ, setOcc] = useState<Map<string, Occurrence>>(new Map());
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [silenced, setSilenced] = useState<Set<string>>(new Set());
+  const [now, setNow] = useState(() => new Date());
+  const loadedDays = useRef(new Set<ISODate>());
+  const [, bump] = useState(0);
+
+  const mergeOcc = useCallback((rows: Occurrence[]) => {
+    setOcc((prev) => {
+      const next = new Map(prev);
+      for (const o of rows) next.set(keyOf(o.task_id, o.date), o);
+      return next;
+    });
+  }, []);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    const { data, error } = await supabase.from("tasks").select("*").order("created_at");
+    if (error) {
+      setLoadError(error.message);
+      setLoading(false);
+      return;
+    }
+    const list = (data as any[]).map(rowToTask);
+    setTasks(list);
+    // A restock stays on the list until it is done, so its done date matters for every day.
+    const restockIds = list.filter((t) => t.category === "restock").map((t) => t.id);
+    if (restockIds.length) {
+      const res = await supabase.from("task_occurrences").select("*").in("task_id", restockIds);
+      if (res.error) setLoadError(res.error.message);
+      else mergeOcc((res.data as any[]).map(rowToOcc));
+    }
+    setLoading(false);
+  }, [mergeOcc]);
+
+  useEffect(() => {
+    if (userId) void reload();
+  }, [userId, reload]);
+
+  // Tick every 30 seconds so reminders turn "due" on time and the day rolls over at midnight.
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(new Date()), 30_000);
+    const onVisible = () => document.visibilityState === "visible" && setNow(new Date());
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
+
+  const ensureDay = useCallback(
+    async (date: ISODate) => {
+      if (loadedDays.current.has(date)) return;
+      const { data, error } = await supabase.from("task_occurrences").select("*").eq("date", date);
+      if (error) {
+        setLoadError(error.message);
+        return;
+      }
+      loadedDays.current.add(date);
+      mergeOcc((data as any[]).map(rowToOcc));
+      bump((n) => n + 1);
+    },
+    [mergeOcc],
+  );
+
+  const isDayLoaded = useCallback((date: ISODate) => loadedDays.current.has(date), []);
+
+  const today = todayISO(now);
+  useEffect(() => {
+    if (userId) void ensureDay(today);
+  }, [userId, today, ensureDay]);
+
+  const timeOn = useCallback(
+    (task: Task, date: ISODate) => occ.get(keyOf(task.id, date))?.time_override ?? task.time,
+    [occ],
+  );
+
+  const restockDoneDate = useCallback(
+    (taskId: string): ISODate | null => {
+      let found: ISODate | null = null;
+      for (const o of occ.values()) {
+        if (o.task_id === taskId && o.status === "done" && (!found || o.date < found)) found = o.date;
+      }
+      return found;
+    },
+    [occ],
+  );
+
+  const instancesOn = useCallback(
+    (date: ISODate): TaskInstance[] => {
+      const out: TaskInstance[] = [];
+      for (const task of tasks) {
+        if (task.category === "restock") {
+          // Rolls forward each day until it is done. Future days only show the day it was planned for.
+          if (date < task.start_date) continue;
+          const doneOn = restockDoneDate(task.id);
+          if (doneOn && date > doneOn) continue;
+          if (date !== task.start_date && date > today) continue;
+        } else if (!occursOn(task, date)) {
+          continue;
+        }
+        const o = occ.get(keyOf(task.id, date));
+        out.push({ task, date, status: o?.status ?? "pending", time: o?.time_override ?? task.time });
+      }
+      return out.sort((a, b) => (a.time ?? "99:99").localeCompare(b.time ?? "99:99") || a.task.created_at.localeCompare(b.task.created_at));
+    },
+    [tasks, occ, restockDoneDate, today],
+  );
+
+  const dueReminders = useMemo(() => {
+    const t = nowTime(now);
+    return instancesOn(today).filter(
+      (i) =>
+        (i.task.category === "reminder" || i.task.category === "birthday") &&
+        i.status === "pending" &&
+        i.time !== null &&
+        i.time <= t &&
+        !silenced.has(keyOf(i.task.id, i.date)),
+    );
+  }, [instancesOn, today, now, silenced]);
+
+  const silence = useCallback((i: TaskInstance) => {
+    setSilenced((s) => new Set(s).add(keyOf(i.task.id, i.date)));
+  }, []);
+  const isSilenced = useCallback((i: TaskInstance) => silenced.has(keyOf(i.task.id, i.date)), [silenced]);
+
+  /** Runs a change, turning failures into a visible message instead of silent loss. */
+  const attempt = useCallback(async (fn: () => Promise<void>): Promise<boolean> => {
+    setActionError(null);
+    try {
+      await fn();
+      return true;
+    } catch (e) {
+      setActionError(describe(e));
+      return false;
+    }
+  }, []);
+
+  const insertTask = async (input: NewTask): Promise<Task> => {
+    const { data, error } = await supabase.from("tasks").insert(input).select().single();
+    if (error) throw error;
+    const task = rowToTask(data);
+    setTasks((prev) => [...prev, task]);
+    return task;
+  };
+
+  const patchTask = async (id: string, patch: Partial<NewTask>) => {
+    const { data, error } = await supabase.from("tasks").update(patch).eq("id", id).select().single();
+    if (error) throw error;
+    const task = rowToTask(data);
+    setTasks((prev) => prev.map((t) => (t.id === id ? task : t)));
+  };
+
+  const upsertOcc = async (taskId: string, date: ISODate, fields: Partial<Occurrence>) => {
+    const { data, error } = await supabase
+      .from("task_occurrences")
+      .upsert({ task_id: taskId, date, ...fields }, { onConflict: "task_id,date" })
+      .select()
+      .single();
+    if (error) throw error;
+    mergeOcc([rowToOcc(data)]);
+  };
+
+  const removeTask = async (id: string) => {
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
+    if (error) throw error;
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const endSeriesBefore = (task: Task, date: ISODate): Recurrence =>
+    ({ ...task.recurrence, until: addDays(date, -1) }) as Recurrence;
+
+  const value: Ctx = {
+    tasks,
+    loading,
+    loadError,
+    actionError,
+    clearActionError: () => setActionError(null),
+    reload,
+    ensureDay,
+    isDayLoaded,
+    instancesOn,
+    timeOn,
+    dueReminders,
+    silence,
+    isSilenced,
+    createTask: (input) => attempt(async () => void (await insertTask(input))),
+    setStatus: (task, date, status) => attempt(() => upsertOcc(task.id, date, { status })),
+    moveTime: (task, date, time) =>
+      attempt(async () => {
+        // A one-off task owns its time. A recurring task only moves for this one day.
+        if (task.recurrence.type === "once") await patchTask(task.id, { time });
+        else await upsertOcc(task.id, date, { time_override: time });
+      }),
+    modifyTask: (task, date, scope, next) =>
+      attempt(async () => {
+        const inPlace = task.recurrence.type === "once" || task.recurrence.type === "yearly" || task.category === "restock";
+        if (inPlace || (scope === "future" && date === task.start_date)) {
+          await patchTask(task.id, next);
+          return;
+        }
+        if (scope === "only") {
+          await upsertOcc(task.id, date, { status: "skipped" });
+          await insertTask({ ...next, start_date: date, recurrence: { type: "once" } });
+          return;
+        }
+        await patchTask(task.id, { recurrence: endSeriesBefore(task, date) });
+        await insertTask({ ...next, start_date: date });
+      }),
+    deleteTask: (task, date, scope) =>
+      attempt(async () => {
+        const wholeTask =
+          task.recurrence.type === "once" || task.recurrence.type === "yearly" || task.category === "restock";
+        if (wholeTask || (scope === "future" && date === task.start_date)) {
+          await removeTask(task.id);
+        } else if (scope === "only") {
+          await upsertOcc(task.id, date, { status: "skipped" });
+        } else {
+          await patchTask(task.id, { recurrence: endSeriesBefore(task, date) });
+        }
+      }),
+  };
+
+  return <TasksContext.Provider value={value}>{children}</TasksContext.Provider>;
+}
+
+export function useTasks() {
+  const ctx = useContext(TasksContext);
+  if (!ctx) throw new Error("useTasks must be used inside TasksProvider");
+  return ctx;
+}
+
