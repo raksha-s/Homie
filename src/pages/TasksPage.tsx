@@ -12,6 +12,7 @@ import TaskCard from "../features/tasks/TaskCard";
 import TaskForm from "../features/tasks/TaskForm";
 import { ChangeTimeSheet, ConfirmDeleteSheet, ScopeSheet } from "../features/tasks/Sheets";
 import { slotCounts, slotState } from "../features/tasks/slots";
+import { useInventory } from "../features/inventory/InventoryProvider";
 import { useTasks, type EditScope, type TaskInstance } from "../features/tasks/TasksProvider";
 import type { NewTask } from "../features/tasks/types";
 import { addDays, formatDay, formatMonthYear, startOfWeek, todayISO } from "../lib/dates";
@@ -32,6 +33,7 @@ const isRepeating = (i: TaskInstance) =>
 
 export default function TasksPage() {
   const t = useTasks();
+  const inventory = useInventory();
   const [params, setParams] = useSearchParams();
   const today = todayISO();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(params.get("date") ?? "") ? params.get("date")! : today;
@@ -245,7 +247,7 @@ export default function TasksPage() {
                 due={due}
                 expanded={expanded === k}
                 onToggleExpand={() => setExpanded(expanded === k ? null : k)}
-                onToggleDone={() => void t.setStatus(inst.task, inst.date, inst.status === "done" ? "pending" : "done")}
+                onToggleDone={() => inventory.toggleDone(inst)}
                 onSkip={() => {
                   void t.setStatus(inst.task, inst.date, inst.status === "skipped" ? "pending" : "skipped");
                   setExpanded(null);

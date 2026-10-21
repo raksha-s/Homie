@@ -44,7 +44,11 @@ type Ctx = {
   silence: (inst: TaskInstance) => void;
   isSilenced: (inst: TaskInstance) => boolean;
   createTask: (input: NewTask) => Promise<boolean>;
+  /** Like createTask, but hands back the saved task (null on failure). */
+  addTask: (input: NewTask) => Promise<Task | null>;
   setStatus: (task: Task, date: ISODate, status: OccurrenceStatus) => Promise<boolean>;
+  /** Clears every "done" mark on a task, so a Shopping List item that was ticked is open again. */
+  reopenTask: (task: Task) => Promise<boolean>;
   moveTime: (task: Task, date: ISODate, time: string) => Promise<boolean>;
   modifyTask: (task: Task, date: ISODate, scope: EditScope, next: NewTask) => Promise<boolean>;
   deleteTask: (task: Task, date: ISODate, scope: EditScope) => Promise<boolean>;
@@ -391,7 +395,19 @@ export function TasksProvider({ children }: { children: ReactNode }) {
         if (tok) await withGcal(tok, "Saved, but not added to Google Calendar", (token) => addToCalendar(token, task));
       });
     },
+    addTask: async (input) => {
+      let saved: Task | null = null;
+      await attempt(async () => {
+        saved = await insertTask(input);
+      });
+      return saved;
+    },
     setStatus: (task, date, status) => attempt(() => upsertOcc(task.id, date, { status })),
+    reopenTask: (task) =>
+      attempt(async () => {
+        const done = [...occ.values()].filter((o) => o.task_id === task.id && o.status === "done");
+        for (const o of done) await upsertOcc(task.id, o.date, { status: "pending" });
+      }),
     moveTime: (task, date, time) => {
       const once = task.recurrence.type === "once";
       const tok = once && task.gcal_event_id ? startToken() : null;

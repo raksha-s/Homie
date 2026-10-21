@@ -1,10 +1,12 @@
 import { Outlet } from "react-router-dom";
 import BottomNav from "./BottomNav";
 import { TasksProvider } from "../features/tasks/TasksProvider";
+import { InventoryProvider } from "../features/inventory/InventoryProvider";
 
 export default function AppShell() {
   return (
     <TasksProvider>
+    <InventoryProvider>
     <div className="mx-auto flex min-h-dvh max-w-[640px] flex-col">
       <main
         id="main"
@@ -15,6 +17,7 @@ export default function AppShell() {
       </main>
       <BottomNav />
     </div>
+    </InventoryProvider>
     </TasksProvider>
   );
 }

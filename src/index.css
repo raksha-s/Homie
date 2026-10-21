@@ -17,6 +17,8 @@
   --accent-strong: #0b5c56;
   --on-accent: #f2f8f7;
   --danger: #b42318;
+  --success: #1a6b3a;
+  --on-success: #f2f8f4;
   --focus: #0f766e;
   --shadow: 0 1px 2px rgb(23 32 30 / 0.06), 0 8px 24px rgb(23 32 30 / 0.08);
   --nav-height: 64px;
@@ -35,6 +37,8 @@
     --accent-strong: #5eead4;
     --on-accent: #062a26;
     --danger: #ff8a80;
+    --success: #6ee7a0;
+    --on-success: #06271a;
     --focus: #5eead4;
     --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
     color-scheme: dark;
@@ -53,6 +57,7 @@
   --color-accent-strong: var(--accent-strong);
   --color-on-accent: var(--on-accent);
   --color-danger: var(--danger);
+  --color-success: var(--success);
   --radius-control: 12px;
   --radius-card: 16px;
 }
@@ -175,7 +180,8 @@ a,
 }
 .btn-primary,
 .btn-secondary,
-.btn-danger {
+.btn-danger,
+.btn-success {
   min-height: 48px;
   padding: 0 20px;
   border-radius: var(--radius-control);
@@ -184,7 +190,8 @@ a,
 }
 .btn-primary:active,
 .btn-secondary:active,
-.btn-danger:active {
+.btn-danger:active,
+.btn-success:active {
   transform: scale(0.97);
 }
 .btn-primary {
@@ -201,6 +208,14 @@ a,
 .btn-danger {
   background: var(--danger);
   color: var(--bg);
+}
+.btn-success {
+  background: var(--success);
+  color: var(--on-success);
+}
+.btn-danger:disabled,
+.btn-success:disabled {
+  opacity: 0.6;
 }
 
 /* Category badges. Text and tint pairs are chosen for AA contrast; the label and icon carry the meaning too. */

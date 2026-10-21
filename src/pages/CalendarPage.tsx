@@ -8,6 +8,7 @@ import Dots from "../features/calendar/Dots";
 import Ring from "../features/calendar/Ring";
 import { describeDay, type DayStats } from "../features/calendar/dayStats";
 import { useDayStats } from "../features/calendar/useDayStats";
+import { useInventory } from "../features/inventory/InventoryProvider";
 import { useTasks, type TaskInstance } from "../features/tasks/TasksProvider";
 import {
   addDays,
@@ -38,6 +39,7 @@ const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export default function CalendarPage() {
   const t = useTasks();
+  const inventory = useInventory();
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const today = todayISO();
@@ -67,7 +69,7 @@ export default function CalendarPage() {
   }, [from, to]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openInTasks = (d: ISODate) => nav(d === today ? "/main/tasks" : `/main/tasks?date=${d}`);
-  const toggle = (i: TaskInstance) => void t.setStatus(i.task, i.date, i.status === "done" ? "pending" : "done");
+  const toggle = (i: TaskInstance) => inventory.toggleDone(i);
 
   const step = (dir: -1 | 1) => {
     if (view === "week") setAnchor(addDays(anchor, 7 * dir));
