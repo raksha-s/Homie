@@ -1,0 +1,154 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+
+/*
+  Design tokens. One accent (deep teal), neutral greys, no pure black or white.
+  Radius scale: controls 12px, cards 16px, pills full.
+  All text pairs below were chosen to meet WCAG AA (4.5:1) in both modes.
+*/
+:root {
+  --bg: #f4f6f5;
+  --surface: #fbfcfb;
+  --surface-sunken: #e9eeec;
+  --border: #cfd8d5;
+  --text: #17201e;
+  --text-muted: #4d5a56;
+  --accent: #0f766e;
+  --accent-strong: #0b5c56;
+  --on-accent: #f2f8f7;
+  --danger: #b42318;
+  --focus: #0f766e;
+  --shadow: 0 1px 2px rgb(23 32 30 / 0.06), 0 8px 24px rgb(23 32 30 / 0.08);
+  --nav-height: 64px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1413;
+    --surface: #151d1b;
+    --surface-sunken: #1c2623;
+    --border: #2d3b37;
+    --text: #e6ecea;
+    --text-muted: #a3b0ac;
+    --accent: #2dd4bf;
+    --accent-strong: #5eead4;
+    --on-accent: #062a26;
+    --danger: #ff8a80;
+    --focus: #5eead4;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-sunken: var(--surface-sunken);
+  --color-line: var(--border);
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --radius-control: 12px;
+  --radius-card: 16px;
+}
+
+/* Mobile-native baseline: no tap flash, no font inflation, app-like overscroll. */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100dvh;
+}
+
+input,
+textarea,
+select {
+  font-size: 16px; /* anything smaller makes iOS zoom the page on focus */
+}
+
+/* Controls: instant tap response, no accidental text selection. Content text stays selectable. */
+button,
+a,
+[role="button"],
+[role="tab"] {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Pressed feedback works for touch and mouse. Hover is only for devices that can hover. */
+.pressable {
+  transition: transform 120ms ease-out, background-color 120ms ease-out;
+}
+.pressable:active {
+  transform: scale(0.97);
+}
+@media (hover: hover) and (pointer: fine) {
+  .pressable-hover:hover {
+    background-color: var(--surface-sunken);
+  }
+}
+
+/* Bottom sheet */
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(8 14 13 / 0.5);
+  z-index: 40;
+}
+.sheet-content {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  max-height: 88dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  margin-inline: auto;
+  max-width: 640px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sheet-overlay[data-state="open"] {
+    animation: fade-in 160ms ease-out;
+  }
+  .sheet-content[data-state="open"] {
+    animation: slide-up 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+@keyframes slide-up {
+  from { transform: translateY(24px); opacity: 0; }
+}

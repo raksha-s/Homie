@@ -1,0 +1,24 @@
+name: Backup release
+
+# Creating a release (or pushing a tag like v0.1.0) attaches a downloadable zip of the full source.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create source zip
+        run: git archive --format=zip --prefix=homie/ -o "homie-source-${GITHUB_REF_NAME}.zip" HEAD
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "homie-source-${GITHUB_REF_NAME}.zip" \
+            --title "Homie ${GITHUB_REF_NAME}" --notes "Full source backup. Unzip to restore." \
+            || gh release upload "${GITHUB_REF_NAME}" "homie-source-${GITHUB_REF_NAME}.zip" --clobber
