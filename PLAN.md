@@ -93,6 +93,7 @@ App shell, bottom nav, floating add button, bottom sheet, tokens, light and dark
 - Restock tasks roll over to the next day until done.
 
 **Phase 3: Calendar and Google Calendar**
+- Update (22 Oct 2026): My Tasks and Calendar are one Main page with Week, Month and Year views. Week is the old My Tasks (week strip plus the day's task list). Month and Year list their tasks below the calendar, day by day, with a line between days. Google sync is an icon beside sign-out.
 - Week, month, year views. Each day shows coloured dots and a completion percentage as text.
 - Tap a day to open My Tasks on that date. Add a task from the calendar by tapping the day, then "Add task".
 - On save, tasks with the box ticked go to your Google Calendar. Birthdays always do.

@@ -6,7 +6,7 @@ import { useTasks } from "../features/tasks/TasksProvider";
 type Item = { to: string; match: string; label: string; icon: Icon };
 
 const items: Item[] = [
-  { to: "/main/tasks", match: "/main", label: "Main", icon: CalendarCheck },
+  { to: "/main", match: "/main", label: "Main", icon: CalendarCheck },
   { to: "/kitchen", match: "/kitchen", label: "Kitchen", icon: CookingPot },
   { to: "/inventory", match: "/inventory", label: "Inventory", icon: Package },
   { to: "/finance", match: "/finance", label: "Finance", icon: Wallet },
@@ -23,7 +23,7 @@ export default function BottomNav() {
     >
       <ul className="mx-auto flex max-w-[640px]" style={{ height: "var(--nav-height)" }}>
         {items.map(({ to, match, label, icon: IconCmp }) => {
-          const badge = to === "/main/tasks" ? due : 0;
+          const badge = to === "/main" ? due : 0;
           const isActive = pathname.startsWith(match);
           return (
           <li key={to} className="flex-1">
